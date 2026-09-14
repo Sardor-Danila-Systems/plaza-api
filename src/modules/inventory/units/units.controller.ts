@@ -21,7 +21,8 @@ export class UnitsController {
   @Get()
   @ApiOperation({
     summary: 'List units of measure in a project',
-    description: 'Read-only — units are provisioned via seed data, not this API.',
+    description:
+      'Read-only — units are provisioned via seed data, not this API.',
   })
   @ApiOkResponse({ type: [UnitResponseDto] })
   @ApiForbiddenResponse({ type: ErrorResponseDto })

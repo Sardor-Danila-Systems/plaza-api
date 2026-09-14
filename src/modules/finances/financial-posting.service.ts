@@ -36,7 +36,11 @@ import { BalanceResponseDto } from './dto/balance-response.dto.js';
 const CREATE_OPERATION_KIND = 'financial_transaction.create';
 const CANCEL_OPERATION_KIND = 'financial_transaction.cancel';
 
-function directionForType(
+/** Exported for Phase 6/7's supplier/purchase workflows, which post their
+ * own OUT-direction FinancialTransaction rows (PURCHASE/ADVANCE/
+ * DEBT_PAYMENT) via `FinancialPostingService.postCashEffect` rather than
+ * `create` (see that method's doc comment). */
+export function directionForType(
   type: FinancialTransactionType,
 ): TransactionDirection {
   switch (type) {
@@ -663,11 +667,25 @@ export class FinancialPostingService {
     return { id: category.id, name: category.name };
   }
 
-  private async resolveRate(
+  /**
+   * Public (not just internal to `create`) so Phase 6/7's supplier/purchase
+   * workflows resolve `currency`/`exchangeRate`/`rateId` the exact same way
+   * finance postings do, rather than a second, potentially-drifting
+   * implementation — the "safe internal posting primitive" this phase's
+   * instructions ask for. Structurally typed against the rate-related
+   * fields alone (not `CreateFinancialTransactionDto` itself), so any DTO
+   * shaped like a rate selection — income/expense, advance funding, debt
+   * payment — can reuse it without depending on finance's own DTO class.
+   */
+  async resolveRate(
     tx: PrismaTx,
     projectId: string,
     currency: Currency,
-    dto: CreateFinancialTransactionDto,
+    dto: {
+      currencyRateId?: string;
+      exchangeRate?: string;
+      rateOverrideReason?: string;
+    },
   ): Promise<{
     exchangeRate: Prisma.Decimal;
     rateId: string | null;
@@ -701,8 +719,8 @@ export class FinancialPostingService {
       };
     }
 
-    // DTO-level `IsValidFinancialTransactionShape` already guarantees both
-    // are present for a USD transaction without currencyRateId.
+    // DTO-level shape validation guarantees both are present for a USD
+    // transaction without currencyRateId.
     return {
       exchangeRate: new Prisma.Decimal(dto.exchangeRate as string),
       rateId: null,
@@ -711,7 +729,163 @@ export class FinancialPostingService {
     };
   }
 
-  private async computeBalance(
+  /**
+   * The safe internal posting primitive Phase 6/7's supplier/purchase
+   * workflows use (docs/backend-architecture.md §6.12: "Never duplicate
+   * cash accounting... Refactor Phase 4 code only if necessary to expose a
+   * safe internal posting primitive"). Unlike `create`, this does NOT open
+   * its own project lock/transaction or its own `PostedOperation` —
+   * `PURCHASE`/`ADVANCE`/`DEBT_PAYMENT` cash effects always share the
+   * calling workflow's own lock and its own already-created operation (a
+   * purchase's cash payment and the purchase itself are one operation, per
+   * docs/backend-data-model.md's "at most one financial row per supplier
+   * payment in an operation"). The caller is responsible for: holding the
+   * project lock (`ProjectLockService.runExclusive`), creating the
+   * `PostedOperation` first, and computing `amountUzs`/`exchangeRate` via
+   * the same `src/common/money/decimal.util.ts` helpers `create` itself
+   * uses — this method only performs the balance check (every OUT-direction
+   * row, regardless of caller, must pass it) and the raw insert.
+   */
+  async postCashEffect(
+    tx: PrismaTx,
+    params: {
+      projectId: string;
+      operationId: string;
+      type: FinancialTransactionType;
+      amount: Prisma.Decimal;
+      currency: Currency;
+      exchangeRate: Prisma.Decimal;
+      amountUzs: Prisma.Decimal;
+      rateSource: RateSource;
+      rateId: string | null;
+      rateOverrideReason: string | null;
+      recipient?: string | null;
+      comment?: string | null;
+      occurredAt: Date;
+      createdById: string;
+      supplierPaymentId: string;
+    },
+  ): Promise<FinancialTransaction> {
+    const direction = directionForType(params.type);
+    if (direction === TransactionDirection.OUT) {
+      await this.assertSufficientBalance(
+        tx,
+        params.projectId,
+        params.currency,
+        params.amount,
+      );
+    }
+    return tx.financialTransaction.create({
+      data: {
+        projectId: params.projectId,
+        operationId: params.operationId,
+        type: params.type,
+        direction,
+        amount: params.amount,
+        currency: params.currency,
+        exchangeRate: params.exchangeRate,
+        amountUzs: params.amountUzs,
+        rateSource: params.rateSource,
+        rateId: params.rateId,
+        rateOverrideReason: params.rateOverrideReason,
+        recipient: params.recipient ?? null,
+        comment: params.comment ?? null,
+        occurredAt: params.occurredAt,
+        createdById: params.createdById,
+        supplierPaymentId: params.supplierPaymentId,
+      },
+    });
+  }
+
+  /**
+   * The reversal-side twin of `postCashEffect`, for the same reason: a
+   * purchase cancellation (Phase 7) reverses its own cash leg inside its
+   * own already-open project lock/transaction/`PostedOperation`, and must
+   * not nest a second one by calling the public `cancel` above. Finds the
+   * one `FinancialTransaction` linked to `supplierPaymentId` (there is at
+   * most one, by that column's own `@unique`), marks it cancelled, and
+   * appends an opposite-direction reversal row with the identical amount/
+   * currency/rate snapshot — the same shape `cancel` produces, minus the
+   * idempotency/audit concerns the caller already owns. The reversal row
+   * deliberately does NOT carry `supplierPaymentId` itself (that column is
+   * unique — it identifies the ORIGINAL cash effect for a given payment,
+   * never a reversal of one), matching how `cancel`'s own reversal never
+   * repeats any other unique identifying field of the original.
+   */
+  async reverseCashEffectForSupplierPayment(
+    tx: PrismaTx,
+    params: {
+      projectId: string;
+      reversalOperationId: string;
+      supplierPaymentId: string;
+      cancellationReason: string;
+      createdById: string;
+    },
+  ): Promise<FinancialTransaction> {
+    const original = await tx.financialTransaction.findFirst({
+      where: {
+        projectId: params.projectId,
+        supplierPaymentId: params.supplierPaymentId,
+      },
+    });
+    if (!original) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'No cash effect found for this supplier payment',
+      });
+    }
+    if (original.cancelledAt) {
+      throw new ConflictException({
+        code: 'TRANSACTION_ALREADY_CANCELLED',
+        message: 'This cash effect has already been reversed',
+      });
+    }
+
+    const reversalDirection =
+      original.direction === TransactionDirection.IN
+        ? TransactionDirection.OUT
+        : TransactionDirection.IN;
+    if (reversalDirection === TransactionDirection.OUT) {
+      await this.assertSufficientBalance(
+        tx,
+        params.projectId,
+        original.currency,
+        original.amount,
+      );
+    }
+
+    await tx.financialTransaction.update({
+      where: { id: original.id },
+      data: {
+        cancelledAt: new Date(),
+        cancellationReason: params.cancellationReason,
+        cancelledById: params.createdById,
+      },
+    });
+
+    return tx.financialTransaction.create({
+      data: {
+        projectId: params.projectId,
+        operationId: params.reversalOperationId,
+        type: original.type,
+        direction: reversalDirection,
+        amount: original.amount,
+        currency: original.currency,
+        exchangeRate: original.exchangeRate,
+        amountUzs: original.amountUzs,
+        rateSource: original.rateSource,
+        rateId: original.rateId,
+        rateOverrideReason: original.rateOverrideReason,
+        recipient: original.recipient,
+        comment: original.comment,
+        occurredAt: original.occurredAt,
+        createdById: params.createdById,
+        reversalOfId: original.id,
+      },
+    });
+  }
+
+  async computeBalance(
     client: PrismaTx | PrismaService['client'],
     projectId: string,
     currency: Currency,
@@ -733,7 +907,7 @@ export class FinancialPostingService {
     return inSum.minus(outSum);
   }
 
-  private async assertSufficientBalance(
+  async assertSufficientBalance(
     tx: PrismaTx,
     projectId: string,
     currency: Currency,

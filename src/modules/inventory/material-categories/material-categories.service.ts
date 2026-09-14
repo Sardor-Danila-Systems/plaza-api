@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../../database/prisma.service.js';
 import { MaterialCategory, Prisma } from '../../../generated/prisma/client.js';
 import { AuditService } from '../../audit/audit.service.js';
@@ -21,7 +25,11 @@ export class MaterialCategoriesService {
     user: AuthenticatedUser,
     projectId: string,
   ): Promise<MaterialCategoryResponseDto[]> {
-    await this.projectAccess.assertAccess(user, projectId, ProjectAccessAction.READ);
+    await this.projectAccess.assertAccess(
+      user,
+      projectId,
+      ProjectAccessAction.READ,
+    );
     const categories = await this.prisma.client.materialCategory.findMany({
       where: { projectId },
       orderBy: { name: 'asc' },
@@ -35,7 +43,11 @@ export class MaterialCategoriesService {
     dto: CreateMaterialCategoryDto,
     requestId?: string,
   ): Promise<MaterialCategoryResponseDto> {
-    await this.projectAccess.assertAccess(user, projectId, ProjectAccessAction.WRITE);
+    await this.projectAccess.assertAccess(
+      user,
+      projectId,
+      ProjectAccessAction.WRITE,
+    );
 
     let category: MaterialCategory;
     try {
@@ -43,7 +55,10 @@ export class MaterialCategoriesService {
         data: { projectId, name: dto.name },
       });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
         throw new ConflictException({
           code: 'UNIQUE_CONSTRAINT_VIOLATION',
           message: `A material category named "${dto.name}" already exists in this project`,
@@ -74,7 +89,11 @@ export class MaterialCategoriesService {
     dto: UpdateMaterialCategoryDto,
     requestId?: string,
   ): Promise<MaterialCategoryResponseDto> {
-    await this.projectAccess.assertAccess(user, projectId, ProjectAccessAction.WRITE);
+    await this.projectAccess.assertAccess(
+      user,
+      projectId,
+      ProjectAccessAction.WRITE,
+    );
     const existing = await this.getCategoryOrThrow(projectId, categoryId);
 
     const updated = await this.prisma.client.$transaction(async (tx) => {

@@ -267,6 +267,7 @@ npm run build           # compile to dist/
 
 - Health check: `GET http://localhost:3000/health` → `{"status":"ok","database":"up","timestamp":"..."}` (or `503` with the standard error shape if the database is unreachable — the application itself still stays up).
 - Swagger UI: `http://localhost:3000/docs` (disable in production via `SWAGGER_ENABLED=false`).
+- Frontend integration handoff: [docs/frontend-integration.md](docs/frontend-integration.md).
 
 ## Tests
 

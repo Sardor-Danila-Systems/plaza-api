@@ -82,6 +82,13 @@ model Project {
   materials             Material[]
   inventoryBalances     InventoryBalance[]
   stockMovements        StockMovement[]
+  suppliers             Supplier[]
+  purchases             Purchase[]
+  supplierPayments      SupplierPayment[]
+  supplierAdvances      SupplierAdvance[]
+  settlementAllocations SettlementAllocation[]
+  stockWriteOffs        StockWriteOff[]
+  warehouseTransfers    WarehouseTransfer[]
 
   @@index([isActive])
 }
@@ -121,6 +128,14 @@ model User {
   financialTransactionsCancelled FinancialTransaction[] @relation("FinancialTransactionCancelledBy")
   auditLogs                      AuditLog[]
   stockMovements                 StockMovement[]
+  purchasesCreated               Purchase[]             @relation("PurchaseCreatedBy")
+  purchasesCancelled             Purchase[]             @relation("PurchaseCancelledBy")
+  supplierPayments               SupplierPayment[]
+  settlementAllocations          SettlementAllocation[]
+  stockWriteOffsCreated          StockWriteOff[]        @relation("StockWriteOffCreatedBy")
+  stockWriteOffsCancelled        StockWriteOff[]        @relation("StockWriteOffCancelledBy")
+  warehouseTransfersCreated      WarehouseTransfer[]    @relation("WarehouseTransferCreatedBy")
+  warehouseTransfersCancelled    WarehouseTransfer[]    @relation("WarehouseTransferCancelledBy")
 
   @@index([projectId, isActive])
 }
@@ -210,6 +225,8 @@ model Floor {
   isActive  Boolean       @default(true)
   createdAt DateTime      @default(now()) @db.Timestamptz(6)
   updatedAt DateTime      @updatedAt @db.Timestamptz(6)
+
+  stockWriteOffs StockWriteOff[]
 
   @@unique([projectId, blockId, label])
   @@unique([projectId, blockId, id])
@@ -343,6 +360,12 @@ model PostedOperation {
   reversedBy   PostedOperation? @relation("PostedOperationReversal")
 
   financialTransactions FinancialTransaction[]
+  purchases             Purchase[]
+  supplierPayments      SupplierPayment[]
+  settlementAllocations SettlementAllocation[]
+  stockMovements        StockMovement[]
+  stockWriteOffs        StockWriteOff[]
+  warehouseTransfers    WarehouseTransfer[]
 
   @@unique([projectId, id])
   @@unique([projectId, actorId, kind, idempotencyKey])
@@ -441,7 +464,18 @@ model FinancialTransaction {
   reversalOf   FinancialTransaction? @relation("FinancialTransactionReversal", fields: [reversalOfId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   reversedBy   FinancialTransaction? @relation("FinancialTransactionReversal")
 
+  /// Phase 6 addition: the cash effect of one supplier payment (purpose
+  /// PURCHASE_CASH/DEBT_PAYMENT/ADVANCE_FUNDING), when this row is one.
+  /// `@unique` because at most one financial row exists per supplier
+  /// payment (docs/backend-data-model.md §"Operations, cash, and
+  /// currency"). Composite-FK'd against `(projectId, id)` on
+  /// `SupplierPayment`, the same cross-project-mismatch prevention as every
+  /// other project-scoped child reference in this schema.
+  supplierPaymentId String?          @unique @db.Uuid
+  supplierPayment   SupplierPayment? @relation(fields: [projectId, supplierPaymentId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
   @@unique([projectId, id])
+  @@unique([projectId, supplierPaymentId])
   @@index([projectId, occurredAt])
   @@index([projectId, type])
   @@index([projectId, categoryId])
@@ -472,6 +506,8 @@ model CurrencyRate {
   createdAt   DateTime   @default(now()) @db.Timestamptz(6)
 
   financialTransactions FinancialTransaction[]
+  purchases             Purchase[]
+  supplierPayments      SupplierPayment[]
 
   @@unique([projectId, id])
   @@index([projectId, currency, effectiveOn])
@@ -591,8 +627,12 @@ model Warehouse {
   createdAt DateTime @default(now()) @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
-  inventoryBalances InventoryBalance[]
-  stockMovements    StockMovement[]
+  inventoryBalances      InventoryBalance[]
+  stockMovements         StockMovement[]
+  purchases              Purchase[]
+  stockWriteOffs         StockWriteOff[]
+  transfersAsSource      WarehouseTransfer[] @relation("WarehouseTransferSource")
+  transfersAsDestination WarehouseTransfer[] @relation("WarehouseTransferDestination")
 
   @@unique([projectId, code])
   @@unique([projectId, id])
@@ -635,8 +675,11 @@ model Material {
   createdAt    DateTime @default(now()) @db.Timestamptz(6)
   updatedAt    DateTime @updatedAt @db.Timestamptz(6)
 
-  inventoryBalances InventoryBalance[]
-  stockMovements    StockMovement[]
+  inventoryBalances  InventoryBalance[]
+  stockMovements     StockMovement[]
+  purchaseItems      PurchaseItem[]
+  stockWriteOffs     StockWriteOff[]
+  warehouseTransfers WarehouseTransfer[]
 
   @@unique([projectId, code])
   @@unique([projectId, id])
@@ -742,6 +785,33 @@ model StockMovement {
   projectId String  @db.Uuid
   project   Project @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
+  /// Phase 7 addition (anticipated in this model's own Phase 5 doc comment:
+  /// "Phase 7/8 extend this table with whatever that phase's actual
+  /// algorithm needs via an ordinary additive migration"). Correlates a
+  /// movement with the operation that created it — needed by purchase
+  /// cancellation to identify exactly which movements one purchase posted,
+  /// and by a future write-off/transfer's own cancellation the same way.
+  operationId String          @db.Uuid
+  operation   PostedOperation @relation(fields: [projectId, operationId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  /// Set only for a PURCHASE_RECEIPT movement — links it back to the exact
+  /// purchase line that created it (Phase 0's own field list for
+  /// StockMovement includes `purchaseItemId`). Null for every other kind.
+  purchaseItemId String?       @db.Uuid
+  purchaseItem   PurchaseItem? @relation(fields: [purchaseItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  /// Phase 8 addition, the same anticipated-extension pattern as
+  /// `purchaseItemId` above. Set only for a `WRITE_OFF` movement — links it
+  /// back to the write-off header that created it (its block/floor/comment
+  /// live there, not duplicated onto every movement).
+  writeOffId String?        @db.Uuid
+  writeOff   StockWriteOff? @relation(fields: [projectId, writeOffId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  /// Set only for a `TRANSFER_OUT`/`TRANSFER_IN` movement — links both legs
+  /// back to the one transfer header that created them.
+  transferId String?            @db.Uuid
+  transfer   WarehouseTransfer? @relation(fields: [projectId, transferId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
   warehouseId String    @db.Uuid
   warehouse   Warehouse @relation(fields: [projectId, warehouseId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
   materialId  String    @db.Uuid
@@ -763,5 +833,409 @@ model StockMovement {
   createdAt   DateTime @default(now()) @db.Timestamptz(6)
 
   @@index([projectId, occurredAt])
+  @@index([projectId, operationId])
+  @@index([projectId, warehouseId, materialId, operationId])
   @@index([warehouseId, materialId, occurredAt])
+  @@index([purchaseItemId])
+  @@index([writeOffId])
+  @@index([transferId])
+}
+
+/// A write-off's header (docs/backend-data-model.md's own field list) — the
+/// block/floor/comment/snapshots live here, once, rather than duplicated
+/// onto the single `StockMovement` row it produces. Required to name a
+/// block AND floor (docs/backend-architecture.md §2: "Require both building
+/// block and floor, and validate their relationship" — non-floor
+/// consumption is an explicit future extension, not this phase's job).
+model StockWriteOff {
+  id          String          @id @default(uuid()) @db.Uuid
+  projectId   String          @db.Uuid
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  operationId String          @unique @db.Uuid
+  operation   PostedOperation @relation(fields: [projectId, operationId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  warehouseId           String    @db.Uuid
+  warehouse             Warehouse @relation(fields: [projectId, warehouseId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  warehouseNameSnapshot String
+
+  materialId           String   @db.Uuid
+  material             Material @relation(fields: [projectId, materialId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  materialNameSnapshot String
+
+  /// Composite FK proves the floor belongs to the named block, the same
+  /// `(projectId, blockId, floorId)` pattern Phase 3's construction module
+  /// already established for `Floor` itself.
+  blockId            String @db.Uuid
+  floorId            String @db.Uuid
+  floor              Floor  @relation(fields: [projectId, blockId, floorId], references: [projectId, blockId, id], onDelete: Restrict, onUpdate: Restrict)
+  blockNameSnapshot  String
+  floorLabelSnapshot String
+
+  /// Valued at the CURRENT weighted-average cost at write-off time
+  /// (transaction-design.md §6) — fixed forever afterward, even if a later
+  /// purchase changes the balance's average.
+  quantity     Decimal @db.Decimal(24, 6)
+  unitCostUzs  Decimal @db.Decimal(30, 8)
+  totalCostUzs Decimal @db.Decimal(30, 8)
+
+  comment    String?
+  occurredAt DateTime @db.Date
+
+  createdById String   @db.Uuid
+  createdBy   User     @relation("StockWriteOffCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+
+  cancelledAt        DateTime? @db.Timestamptz(6)
+  cancellationReason String?
+  cancelledById      String?   @db.Uuid
+  cancelledBy        User?     @relation("StockWriteOffCancelledBy", fields: [cancelledById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  movements StockMovement[]
+
+  @@unique([projectId, id])
+  @@index([projectId, blockId])
+  @@index([projectId, floorId])
+  @@index([projectId, materialId])
+  @@index([projectId, warehouseId])
+}
+
+/// A transfer's header — one row, two `StockMovement` legs
+/// (transaction-design.md §7). Same-project-only by construction: both
+/// warehouses are resolved via this same project's own composite FK.
+model WarehouseTransfer {
+  id          String          @id @default(uuid()) @db.Uuid
+  projectId   String          @db.Uuid
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  operationId String          @unique @db.Uuid
+  operation   PostedOperation @relation(fields: [projectId, operationId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  sourceWarehouseId           String    @db.Uuid
+  sourceWarehouse             Warehouse @relation("WarehouseTransferSource", fields: [projectId, sourceWarehouseId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  sourceWarehouseNameSnapshot String
+
+  destinationWarehouseId           String    @db.Uuid
+  destinationWarehouse             Warehouse @relation("WarehouseTransferDestination", fields: [projectId, destinationWarehouseId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  destinationWarehouseNameSnapshot String
+
+  materialId           String   @db.Uuid
+  material             Material @relation(fields: [projectId, materialId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  materialNameSnapshot String
+
+  /// The exact value removed at the source — never independently recomputed
+  /// at the destination from its own average (transaction-design.md §7).
+  quantity     Decimal @db.Decimal(24, 6)
+  unitCostUzs  Decimal @db.Decimal(30, 8)
+  totalCostUzs Decimal @db.Decimal(30, 8)
+
+  comment    String?
+  occurredAt DateTime @db.Date
+
+  createdById String   @db.Uuid
+  createdBy   User     @relation("WarehouseTransferCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+
+  cancelledAt        DateTime? @db.Timestamptz(6)
+  cancellationReason String?
+  cancelledById      String?   @db.Uuid
+  cancelledBy        User?     @relation("WarehouseTransferCancelledBy", fields: [cancelledById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  movements StockMovement[]
+
+  @@unique([projectId, id])
+  @@index([projectId, sourceWarehouseId])
+  @@index([projectId, destinationWarehouseId])
+  @@index([projectId, materialId])
+}
+
+// -----------------------------------------------------------------------
+// Phase 6 — Suppliers, debt, advances (docs/backend-data-model.md
+// "Purchases and supplier settlements", transaction-design.md §5).
+// `Purchase`/`PurchaseItem` are created here SCHEMA-ONLY, per an explicit
+// decision confirmed with the user: Phase 0's approved design makes debt an
+// entirely derived quantity (`Purchase.totalAmount` minus effective
+// `SettlementAllocation`s) with no separate debt ledger row, and
+// `SettlementAllocation.purchaseId` is a required composite FK — so a
+// working, testable debt-payment/settlement feature cannot exist without
+// the `Purchase` table existing, even though Phase 6 does not implement the
+// purchase-creation ORCHESTRATION workflow (that stays Phase 7's job — "the
+// most important business workflow", its own atomic 11-step algorithm).
+// Phase 6's own tests create `Purchase`/`PurchaseItem` rows directly via
+// Prisma, the same fixture pattern already used for every other
+// service-bypassing direct-DB test in this codebase.
+// -----------------------------------------------------------------------
+
+/// A project-scoped supplier (docs/backend-data-model.md). Deliberately no
+/// `debt`/`advance` scalar field — both are always derived from
+/// `Purchase`/`SupplierPayment`/`SupplierAdvance`/`SettlementAllocation`
+/// rows, never a live mutable balance (the same "no second source of
+/// truth" discipline as `InventoryBalance.averageCostUzs` in Phase 5). No
+/// name-uniqueness constraint: two real-world suppliers can coincidentally
+/// share a display name within one project.
+model Supplier {
+  id            String   @id @default(uuid()) @db.Uuid
+  projectId     String   @db.Uuid
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  name          String
+  contactPerson String?
+  phone         String?
+  comment       String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @db.Timestamptz(6)
+
+  purchases             Purchase[]
+  payments              SupplierPayment[]
+  advances              SupplierAdvance[]
+  settlementAllocations SettlementAllocation[]
+
+  @@unique([projectId, id])
+  @@index([projectId, isActive, name])
+}
+
+/// One posted invoice + simultaneous material receipt
+/// (docs/backend-architecture.md §2: "One posted invoice and simultaneous
+/// material receipt into one warehouse. No drafts, orders, partial
+/// receipts"). SCHEMA-ONLY in Phase 6 — see this section's header comment.
+/// `totalAmount`/`totalAmountUzs` are server-computed from `PurchaseItem`
+/// line totals when Phase 7's posting workflow lands, never a
+/// client-supplied total. Status (UNPAID/PARTIALLY_PAID/PAID/CANCELLED) is
+/// deliberately not a persisted column — it is always derived from
+/// `totalAmount` vs. the sum of effective `SettlementAllocation` rows plus
+/// `cancelledAt`, matching the "no separate debt scalar" principle above;
+/// only `cancelledAt` itself needs to be a real column, since cancellation
+/// is an event, not a computation.
+model Purchase {
+  id          String          @id @default(uuid()) @db.Uuid
+  projectId   String          @db.Uuid
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  operationId String          @db.Uuid
+  operation   PostedOperation @relation(fields: [projectId, operationId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  supplierId           String   @db.Uuid
+  supplier             Supplier @relation(fields: [projectId, supplierId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  /// Denormalized so a later supplier rename never rewrites historical
+  /// display (the same snapshot discipline as
+  /// `FinancialTransaction.categoryNameSnapshot`).
+  supplierNameSnapshot String
+
+  warehouseId           String    @db.Uuid
+  warehouse             Warehouse @relation(fields: [projectId, warehouseId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  warehouseNameSnapshot String
+
+  currency     Currency
+  /// Same rule as `FinancialTransaction.exchangeRate`: always populated,
+  /// exactly `1` for UZS, an explicit positive snapshot for USD.
+  exchangeRate Decimal  @db.Decimal(24, 8)
+
+  rateSource         RateSource    @default(MANUAL)
+  rateId             String?       @db.Uuid
+  rate               CurrencyRate? @relation(fields: [projectId, rateId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  rateOverrideReason String?
+
+  totalAmount    Decimal @db.Decimal(24, 2)
+  totalAmountUzs Decimal @db.Decimal(24, 2)
+
+  invoiceNumber String?
+  comment       String?
+  occurredAt    DateTime @db.Date
+
+  createdById String   @db.Uuid
+  createdBy   User     @relation("PurchaseCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
+
+  cancelledAt        DateTime? @db.Timestamptz(6)
+  cancellationReason String?
+  cancelledById      String?   @db.Uuid
+  cancelledBy        User?     @relation("PurchaseCancelledBy", fields: [cancelledById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  items                 PurchaseItem[]
+  settlementAllocations SettlementAllocation[]
+
+  @@unique([operationId])
+  @@unique([projectId, id])
+  @@unique([projectId, supplierId, id])
+  @@index([projectId, supplierId])
+  @@index([projectId, warehouseId])
+}
+
+/// One material line on a purchase — immutable once posted (Phase 7 never
+/// exposes a PATCH; a correction cancels and recreates the whole purchase).
+/// `unique (purchaseId, materialId)`: MVP rejects duplicate material lines
+/// in one purchase rather than merging them
+/// (transaction-design.md §4 step 2).
+model PurchaseItem {
+  id         String   @id @default(uuid()) @db.Uuid
+  purchaseId String   @db.Uuid
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  lineNumber Int
+
+  materialId           String   @db.Uuid
+  material             Material @relation(fields: [materialId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// Denormalized so a later material rename never rewrites historical
+  /// display.
+  materialNameSnapshot String
+
+  quantity      Decimal @db.Decimal(24, 6)
+  unitPrice     Decimal @db.Decimal(24, 8)
+  lineAmount    Decimal @db.Decimal(24, 2)
+  lineAmountUzs Decimal @db.Decimal(24, 2)
+
+  stockMovements StockMovement[]
+
+  @@unique([purchaseId, lineNumber])
+  @@unique([purchaseId, materialId])
+}
+
+enum SupplierPaymentPurpose {
+  PURCHASE_CASH
+  DEBT_PAYMENT
+  ADVANCE_FUNDING
+}
+
+/// A real cash movement to/from a supplier — always paired with exactly one
+/// `FinancialTransaction` (`FinancialTransaction.supplierPaymentId`), never
+/// a parallel accounting system (this phase's §6.12: "Never duplicate cash
+/// accounting"). `purpose` says which workflow created it; the cash
+/// direction is always OUT for all three purposes in MVP (suppliers are
+/// never refunded through this row — see the domain glossary's `Refund`
+/// distinction preserved from Phase 4).
+model SupplierPayment {
+  id          String          @id @default(uuid()) @db.Uuid
+  projectId   String          @db.Uuid
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  operationId String          @db.Uuid
+  operation   PostedOperation @relation(fields: [projectId, operationId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  supplierId String   @db.Uuid
+  supplier   Supplier @relation(fields: [projectId, supplierId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  purpose SupplierPaymentPurpose
+
+  currency     Currency
+  amount       Decimal  @db.Decimal(24, 2)
+  /// Same rule as `FinancialTransaction.exchangeRate`: always populated,
+  /// exactly `1` for UZS.
+  exchangeRate Decimal  @db.Decimal(24, 8)
+  amountUzs    Decimal  @db.Decimal(24, 2)
+
+  rateSource         RateSource    @default(MANUAL)
+  rateId             String?       @db.Uuid
+  rate               CurrencyRate? @relation(fields: [projectId, rateId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  rateOverrideReason String?
+
+  comment String?
+
+  createdById String   @db.Uuid
+  createdBy   User     @relation(fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+
+  financialTransaction  FinancialTransaction?
+  fundedAdvance         SupplierAdvance?
+  settlementAllocations SettlementAllocation[]
+
+  @@unique([operationId])
+  @@unique([projectId, id])
+  @@unique([projectId, supplierId, id])
+  @@index([projectId, supplierId, currency])
+}
+
+/// Money already paid to a supplier for future purchases
+/// (this phase's §6.3) — genuinely independent of `Purchase`, unlike debt.
+/// Funded exactly once, by exactly one `SupplierPayment`
+/// (`purpose = ADVANCE_FUNDING`); "available advance" is always derived as
+/// `fundedAmount` minus the sum of effective `SettlementAllocation`s
+/// consuming it, never a live mutable balance on this row.
+model SupplierAdvance {
+  id        String  @id @default(uuid()) @db.Uuid
+  projectId String  @db.Uuid
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  supplierId String   @db.Uuid
+  supplier   Supplier @relation(fields: [projectId, supplierId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  fundingPaymentId String          @unique @db.Uuid
+  fundingPayment   SupplierPayment @relation(fields: [projectId, fundingPaymentId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  /// Immutable snapshot copied from the funding payment at creation time —
+  /// this phase's §6.3/§6.4: the advance's own currency never changes
+  /// regardless of what currency later consumes it.
+  currency        Currency
+  fundedAmount    Decimal  @db.Decimal(24, 2)
+  fundedAmountUzs Decimal  @db.Decimal(24, 2)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  settlementAllocations SettlementAllocation[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, supplierId, id])
+  @@unique([projectId, fundingPaymentId])
+  @@index([projectId, supplierId, currency])
+}
+
+enum SettlementEffect {
+  APPLY
+  REVERSE
+}
+
+/// Links a funding source (a `SupplierPayment` cash payment XOR a
+/// `SupplierAdvance`) to the `Purchase` debt it settles — the exact
+/// cross-currency formula (three cases by currency match) is
+/// transaction-design.md §5's authoritative "how"; this model only states
+/// the persisted shape. `debtAmountSettled` (in `debtCurrency`, i.e. the
+/// purchase's own currency) is what actually reduces derived debt; `effect`
+/// (`APPLY`/`REVERSE`) and `reversalOfId` support cancellation without ever
+/// rewriting a posted row (docs/adr/0004-dependency-ordered-cancellation.md).
+model SettlementAllocation {
+  id          String          @id @default(uuid()) @db.Uuid
+  projectId   String          @db.Uuid
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  operationId String          @db.Uuid
+  operation   PostedOperation @relation(fields: [projectId, operationId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  supplierId String   @db.Uuid
+  supplier   Supplier @relation(fields: [projectId, supplierId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  purchaseId String   @db.Uuid
+  purchase   Purchase @relation(fields: [projectId, supplierId, purchaseId], references: [projectId, supplierId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  /// Exactly one of these two is set (XOR CHECK constraint) — the funding
+  /// source this allocation draws from.
+  fundingPaymentId String?          @db.Uuid
+  fundingPayment   SupplierPayment? @relation(fields: [projectId, supplierId, fundingPaymentId], references: [projectId, supplierId, id], onDelete: Restrict, onUpdate: Restrict)
+  advanceId        String?          @db.Uuid
+  advance          SupplierAdvance? @relation(fields: [projectId, supplierId, advanceId], references: [projectId, supplierId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  settlementCurrency Currency
+  settlementAmount   Decimal  @db.Decimal(24, 2)
+  /// `settlementAmount` converted to UZS using the funding source's OWN
+  /// already-recorded rate — never a new rate (transaction-design.md §5).
+  settlementValueUzs Decimal  @db.Decimal(24, 2)
+
+  debtCurrency           Currency
+  /// Required (and positive) only in transaction-design.md §5's case 3
+  /// (`settlementCurrency != debtCurrency` and `debtCurrency != 'UZS'`) —
+  /// enforced by a hand-written CHECK constraint, never defaulted from any
+  /// other rate.
+  settlementExchangeRate Decimal? @db.Decimal(24, 8)
+  debtAmountSettled      Decimal  @db.Decimal(24, 2)
+  /// Informational only (transaction-design.md §5) — never affects debt or
+  /// cash arithmetic.
+  exchangeDifferenceUzs  Decimal  @db.Decimal(24, 2)
+
+  effect SettlementEffect @default(APPLY)
+
+  createdById String   @db.Uuid
+  createdBy   User     @relation(fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+
+  /// Set only on the reversal row; a reversal is itself never reversed.
+  reversalOfId String?               @unique @db.Uuid
+  reversalOf   SettlementAllocation? @relation("SettlementAllocationReversal", fields: [reversalOfId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  reversedBy   SettlementAllocation? @relation("SettlementAllocationReversal")
+
+  @@index([projectId, purchaseId])
+  @@index([projectId, advanceId])
+  @@index([projectId, fundingPaymentId])
 }

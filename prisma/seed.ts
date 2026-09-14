@@ -38,6 +38,24 @@ const STANDARD_EXPENSE_CATEGORIES = [
   'Other',
 ];
 
+/** Standard units of measure every project starts with
+ * (docs/backend-data-model.md: "seeded project rows such as kg, bag, m²").
+ * Not a closed set — this phase gives Unit no manager-writable creation
+ * endpoint (§22), so seed data is the only source; extend this list here,
+ * not via an ad-hoc migration, if a new standard unit is needed later. */
+const STANDARD_UNITS: Array<{ symbol: string; name: string }> = [
+  { symbol: 'шт', name: 'Piece' },
+  { symbol: 'кг', name: 'Kilogram' },
+  { symbol: 'м', name: 'Meter' },
+  { symbol: 'м²', name: 'Square meter' },
+  { symbol: 'м³', name: 'Cubic meter' },
+  { symbol: 'л', name: 'Liter' },
+  { symbol: 'т', name: 'Ton' },
+  { symbol: 'бухта', name: 'Coil' },
+  { symbol: 'лист', name: 'Sheet' },
+  { symbol: 'рейс', name: 'Trip' },
+];
+
 function requireNonProduction(): void {
   if (process.env.NODE_ENV === 'production') {
     throw new Error(
@@ -105,6 +123,19 @@ async function main(): Promise<void> {
       }
       console.log(
         `Seeded ${STANDARD_EXPENSE_CATEGORIES.length} standard expense categories for ${seededProject.name}`,
+      );
+
+      for (const unit of STANDARD_UNITS) {
+        await prisma.unit.upsert({
+          where: {
+            projectId_symbol: { projectId: seededProject.id, symbol: unit.symbol },
+          },
+          create: { projectId: seededProject.id, symbol: unit.symbol, name: unit.name },
+          update: { name: unit.name },
+        });
+      }
+      console.log(
+        `Seeded ${STANDARD_UNITS.length} standard units for ${seededProject.name}`,
       );
     }
 

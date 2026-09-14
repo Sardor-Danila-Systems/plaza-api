@@ -1,5 +1,11 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsOptional, IsString, IsUUID, Length } from 'class-validator';
+import {
+  IsBoolean,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+} from 'class-validator';
 import { IsDecimalString } from '../../../../common/validators/decimal-string.validator.js';
 
 /** `code` and `unitId` are deliberately absent — see `Material`'s doc

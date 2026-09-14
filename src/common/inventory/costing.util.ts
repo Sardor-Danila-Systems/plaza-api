@@ -64,6 +64,40 @@ export function receiveStock(
   };
 }
 
+/**
+ * A receipt whose authoritative figure is the total posted value `v`, not a
+ * unit cost — exactly transaction-design.md §6's own parameterization
+ * ("received quantity q, posted receipt value v"), and exactly what a
+ * purchase line has on hand at receipt time: `PurchaseItem.lineAmountUzs`,
+ * already the authoritative per-line share of the invoice's UZS total from
+ * the largest-remainder distribution (transaction-design.md §4 step 3).
+ *
+ * Deliberately a separate function from `receiveStock` rather than that
+ * function fed a derived `incomingUnitCostUzs = v / q`: `receiveStock`
+ * would then recompute `totalCostUzs = round8(q * (v / q))`, which is only
+ * guaranteed to reproduce `v` exactly to the extent Decimal division and
+ * remultiplication round-trip losslessly — not a guarantee this codebase
+ * relies on elsewhere (see `depleteStock`'s own full-depletion carve-out for
+ * the same reason). Here `v` is stored verbatim as `totalCostUzs`, and only
+ * the *display* `unitCostUzs` is derived from it, so the purchase's own
+ * per-line total is never put at the mercy of a division round-trip.
+ */
+export function receiveStockByValue(
+  current: StockPosition,
+  incomingQuantity: Prisma.Decimal,
+  incomingTotalCostUzs: Prisma.Decimal,
+): { result: StockPosition; unitCostUzs: Prisma.Decimal } {
+  return {
+    result: {
+      quantity: current.quantity.plus(incomingQuantity),
+      valueUzs: current.valueUzs.plus(incomingTotalCostUzs),
+    },
+    unitCostUzs: incomingQuantity.isZero()
+      ? new Prisma.Decimal(0)
+      : roundCarryingValue(incomingTotalCostUzs.dividedBy(incomingQuantity)),
+  };
+}
+
 /** Thrown by `depleteStock` when the requested outgoing quantity exceeds
  * what is on hand — a plain, framework-agnostic error (no NestJS
  * dependency here, matching this module's status as a pure utility); the
@@ -112,7 +146,10 @@ export function depleteStock(
 
   if (outgoingQuantity.equals(current.quantity)) {
     return {
-      result: { quantity: new Prisma.Decimal(0), valueUzs: new Prisma.Decimal(0) },
+      result: {
+        quantity: new Prisma.Decimal(0),
+        valueUzs: new Prisma.Decimal(0),
+      },
       unitCostUzs,
       // The entire remaining carrying value departs with the last unit,
       // not `outgoingQuantity * unitCostUzs` (which could differ from

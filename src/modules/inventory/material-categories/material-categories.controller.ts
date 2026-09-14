@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Req,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
@@ -65,6 +74,12 @@ export class MaterialCategoriesController {
     @Body() dto: UpdateMaterialCategoryDto,
     @Req() req: Request,
   ): Promise<MaterialCategoryResponseDto> {
-    return this.categoriesService.update(user, projectId, categoryId, dto, req.id);
+    return this.categoriesService.update(
+      user,
+      projectId,
+      categoryId,
+      dto,
+      req.id,
+    );
   }
 }

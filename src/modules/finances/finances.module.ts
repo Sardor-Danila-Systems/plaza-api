@@ -20,5 +20,6 @@ import { FinancialTransactionsController } from './financial-transactions.contro
     TransactionCategoriesService,
     CurrencyRatesService,
   ],
+  exports: [FinancialPostingService],
 })
 export class FinancesModule {}

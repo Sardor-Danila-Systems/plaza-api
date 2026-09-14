@@ -22,8 +22,15 @@ export class UnitsService {
     private readonly projectAccess: ProjectAccessService,
   ) {}
 
-  async list(user: AuthenticatedUser, projectId: string): Promise<UnitResponseDto[]> {
-    await this.projectAccess.assertAccess(user, projectId, ProjectAccessAction.READ);
+  async list(
+    user: AuthenticatedUser,
+    projectId: string,
+  ): Promise<UnitResponseDto[]> {
+    await this.projectAccess.assertAccess(
+      user,
+      projectId,
+      ProjectAccessAction.READ,
+    );
     const units = await this.prisma.client.unit.findMany({
       where: { projectId },
       orderBy: { name: 'asc' },

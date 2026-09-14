@@ -4,6 +4,7 @@ import {
   averageCostUzs,
   depleteStock,
   receiveStock,
+  receiveStockByValue,
 } from './costing.util.js';
 
 function pos(quantity: string, valueUzs: string) {
@@ -84,6 +85,43 @@ describe('receiveStock', () => {
   });
 });
 
+describe('receiveStockByValue', () => {
+  it('stores the total value verbatim, deriving unit cost by division', () => {
+    const current = pos('10', '1000'); // 10 * 100 average
+    const { result, unitCostUzs } = receiveStockByValue(
+      current,
+      new Prisma.Decimal('10'),
+      new Prisma.Decimal('2000'),
+    );
+    expect(unitCostUzs.toString()).toBe('200');
+    expect(result.quantity.toString()).toBe('20');
+    expect(result.valueUzs.toString()).toBe('3000');
+    expect(averageCostUzs(result).toString()).toBe('150');
+  });
+
+  it('never loses a cent of an exact largest-remainder-distributed total, even when it does not divide evenly by quantity', () => {
+    const current = pos('0', '0');
+    // 100 UZS over 3 units does not divide evenly (33.333...), but the
+    // posted total must still be stored exactly as given.
+    const { result, unitCostUzs } = receiveStockByValue(
+      current,
+      new Prisma.Decimal('3'),
+      new Prisma.Decimal('100'),
+    );
+    expect(result.valueUzs.toString()).toBe('100');
+    expect(unitCostUzs.toFixed(8)).toBe('33.33333333');
+  });
+
+  it('is 0 unit cost for a 0-quantity receipt, never a division-by-zero error', () => {
+    const { unitCostUzs } = receiveStockByValue(
+      pos('0', '0'),
+      new Prisma.Decimal('0'),
+      new Prisma.Decimal('0'),
+    );
+    expect(unitCostUzs.toString()).toBe('0');
+  });
+});
+
 describe('depleteStock', () => {
   it('matches the worked example: current 10, out 3 => 7 remaining, average unchanged', () => {
     const current = pos('10', '1000'); // average 100
@@ -161,5 +199,27 @@ describe('depleteStock', () => {
     expect(totalCostUzs.toString()).toBe('0');
     expect(result.quantity.toString()).toBe('3');
     expect(result.valueUzs.toString()).toBe('0');
+  });
+});
+
+describe('transfer costing composition', () => {
+  it('moves exact source value into the destination weighted average', () => {
+    const source = pos('10', '1000');
+    const destination = pos('10', '2000');
+
+    const outgoing = depleteStock(source, new Prisma.Decimal('10'));
+    const incoming = receiveStockByValue(
+      destination,
+      new Prisma.Decimal('10'),
+      outgoing.totalCostUzs,
+    );
+
+    expect(outgoing.result.quantity.toString()).toBe('0');
+    expect(outgoing.result.valueUzs.toString()).toBe('0');
+    expect(outgoing.unitCostUzs.toString()).toBe('100');
+    expect(outgoing.totalCostUzs.toString()).toBe('1000');
+    expect(incoming.result.quantity.toString()).toBe('20');
+    expect(incoming.result.valueUzs.toString()).toBe('3000');
+    expect(averageCostUzs(incoming.result).toString()).toBe('150');
   });
 });

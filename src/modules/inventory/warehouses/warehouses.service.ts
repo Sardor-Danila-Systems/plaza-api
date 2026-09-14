@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../../database/prisma.service.js';
 import { Prisma, Warehouse } from '../../../generated/prisma/client.js';
 import { AuditService } from '../../audit/audit.service.js';
@@ -28,7 +32,11 @@ export class WarehousesService {
     user: AuthenticatedUser,
     projectId: string,
   ): Promise<WarehouseResponseDto[]> {
-    await this.projectAccess.assertAccess(user, projectId, ProjectAccessAction.READ);
+    await this.projectAccess.assertAccess(
+      user,
+      projectId,
+      ProjectAccessAction.READ,
+    );
     const warehouses = await this.prisma.client.warehouse.findMany({
       where: { projectId },
       orderBy: { name: 'asc' },
@@ -41,7 +49,11 @@ export class WarehousesService {
     projectId: string,
     warehouseId: string,
   ): Promise<WarehouseResponseDto> {
-    await this.projectAccess.assertAccess(user, projectId, ProjectAccessAction.READ);
+    await this.projectAccess.assertAccess(
+      user,
+      projectId,
+      ProjectAccessAction.READ,
+    );
     const warehouse = await this.getWarehouseOrThrow(projectId, warehouseId);
     return this.toResponse(warehouse);
   }
@@ -52,15 +64,27 @@ export class WarehousesService {
     dto: CreateWarehouseDto,
     requestId?: string,
   ): Promise<WarehouseResponseDto> {
-    await this.projectAccess.assertAccess(user, projectId, ProjectAccessAction.WRITE);
+    await this.projectAccess.assertAccess(
+      user,
+      projectId,
+      ProjectAccessAction.WRITE,
+    );
 
     let warehouse: Warehouse;
     try {
       warehouse = await this.prisma.client.warehouse.create({
-        data: { projectId, name: dto.name, code: dto.code, comment: dto.comment },
+        data: {
+          projectId,
+          name: dto.name,
+          code: dto.code,
+          comment: dto.comment,
+        },
       });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
         throw new ConflictException({
           code: 'UNIQUE_CONSTRAINT_VIOLATION',
           message: `A warehouse with code "${dto.code}" already exists in this project`,
@@ -91,7 +115,11 @@ export class WarehousesService {
     dto: UpdateWarehouseDto,
     requestId?: string,
   ): Promise<WarehouseResponseDto> {
-    await this.projectAccess.assertAccess(user, projectId, ProjectAccessAction.WRITE);
+    await this.projectAccess.assertAccess(
+      user,
+      projectId,
+      ProjectAccessAction.WRITE,
+    );
     const existing = await this.getWarehouseOrThrow(projectId, warehouseId);
 
     const updated = await this.prisma.client.$transaction(async (tx) => {

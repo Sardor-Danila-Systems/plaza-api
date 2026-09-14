@@ -97,6 +97,12 @@ export class WarehousesController {
     @Body() dto: UpdateWarehouseDto,
     @Req() req: Request,
   ): Promise<WarehouseResponseDto> {
-    return this.warehousesService.update(user, projectId, warehouseId, dto, req.id);
+    return this.warehousesService.update(
+      user,
+      projectId,
+      warehouseId,
+      dto,
+      req.id,
+    );
   }
 }

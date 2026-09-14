@@ -69,5 +69,11 @@
     "supertest": "^7.0.0",
     "tsx": "^4.23.13",
     "typescript": "^6.0.2"
+  },
+  "overrides": {
+    "deepmerge-ts": "8.0.2",
+    "mysql2": "3.24.4",
+    "tmp": "0.2.7",
+    "undici": "6.28.1"
   }
 }
