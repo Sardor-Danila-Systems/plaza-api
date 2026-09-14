@@ -1,0 +1,767 @@
+// Phase 1 established the generator/datasource foundation. Phase 2 added
+// authentication/roles. Phase 3 adds the real Project domain and its
+// construction structure (BuildingBlock/Floor), per
+// docs/backend-architecture.md §12's phase plan.
+//
+// `postingSequence` (financial-transaction locking primitive, per
+// transaction-design.md §1) is deliberately still absent from Project: it has
+// no consumer until Phase 4 implements the project-lock protocol, and adding
+// speculative schema nothing reads is not "the fields this phase needs" any
+// more than it was in Phase 1/2. `timezone` IS added now — Phase 3 is
+// explicitly the phase that "replaces the Phase 2 structural Project
+// placeholder with the real Phase 3 Project model" (Phase 3 instructions §1),
+// i.e. it owns Project's own identity, even though the field's *consumer*
+// (business-date boundary logic) arrives with Phase 4.
+//
+// Two families of hand-written SQL live in the migration because Prisma's
+// schema language cannot express them (each verified empirically against the
+// pinned CLI, not assumed):
+// - Cross-column conditional CHECK constraints (`@@check` is not valid
+//   Prisma v7 syntax) — established in Phase 2, see
+//   docs/adr/0008-manual-sql-check-constraints.md.
+// - Partial/filtered unique indexes (Prisma v7 *does* support these, but only
+//   behind the `partialIndexes` preview feature; consistent with this
+//   project's general avoidance of non-stable Prisma functionality — see
+//   docs/adr/0007's and docs/phase-0-review.md's pinned-stable-version
+//   reasoning — the one-active-manager-per-project constraint below is
+//   hand-written instead of opting into a preview feature) — see
+//   docs/adr/0013-project-manager-relation.md.
+
+generator client {
+  provider = "prisma-client"
+  // Generated under src/ (not project-root /generated) so it stays inside
+  // tsconfig.build.json's rootDir ("./src") and the Nest build's normal
+  // src -> dist layout, instead of requiring a separate build-output rule.
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  OWNER
+  PROJECT_MANAGER
+  ACCOUNTANT
+}
+
+model Project {
+  id              String   @id @default(uuid()) @db.Uuid
+  name            String
+  code            String   @unique
+  /// IANA timezone name (default matches docs/backend-architecture.md's
+  /// documented default). Not yet enforced immutable-after-first-posting —
+  /// that requires Phase 4's posting concept to exist first; see the file
+  /// header. All Project fields, including `name`/`code`/`timezone`, are
+  /// administrative metadata changed only through the provisioning
+  /// mechanism (ProjectProvisioningService), never through the business
+  /// HTTP API — see docs/adr/0014, corrected in Phase 3.1 to also cover
+  /// project rename (originally, and wrongly, exposed as a manager-writable
+  /// `PATCH /projects/:projectId`).
+  timezone        String   @default("Asia/Samarkand")
+  isActive        Boolean  @default(true)
+  /// The project-lock/idempotency counter (transaction-design.md §1):
+  /// incremented exactly once per mutating operation, inside the same
+  /// `SELECT ... FOR UPDATE` transaction that reads it, and copied onto the
+  /// new `PostedOperation.sequence`. Deliberately deferred from Phase 1-3
+  /// (no consumer existed); Phase 4's finance posting workflow is the first.
+  postingSequence BigInt   @default(0)
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @db.Timestamptz(6)
+
+  managers              User[]
+  buildingBlocks        BuildingBlock[]
+  transactionCategories TransactionCategory[]
+  postedOperations      PostedOperation[]
+  financialTransactions FinancialTransaction[]
+  currencyRates         CurrencyRate[]
+  auditLogs             AuditLog[]
+  warehouses            Warehouse[]
+  units                 Unit[]
+  materialCategories    MaterialCategory[]
+  materials             Material[]
+  inventoryBalances     InventoryBalance[]
+  stockMovements        StockMovement[]
+
+  @@index([isActive])
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  /// Stored lowercased/trimmed; see src/modules/auth/email-normalization.ts.
+  /// Never trust an unnormalized comparison elsewhere.
+  email        String   @unique
+  displayName  String
+  passwordHash String
+  role         Role
+  /// Required iff role = PROJECT_MANAGER; enforced by a hand-written CHECK
+  /// constraint (see the file header) because Prisma cannot express a
+  /// cross-column conditional constraint natively. A deactivated former
+  /// PROJECT_MANAGER keeps their historical projectId (never nulled) —
+  /// reassignment works by deactivating the old manager and activating the
+  /// new one, not by editing this column on the old row. A hand-written
+  /// partial unique index enforces "at most one ACTIVE PROJECT_MANAGER per
+  /// project" without conflicting with that historical value — see
+  /// docs/adr/0013-project-manager-relation.md.
+  projectId    String?  @db.Uuid
+  project      Project? @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(6)
+
+  refreshSessions RefreshSession[]
+
+  postedOperations               PostedOperation[]
+  currencyRates                  CurrencyRate[]
+  /// Every FinancialTransaction this user posted. Never nulled/reassigned —
+  /// it is a historical fact, not a live pointer (see FinancialTransaction.createdById).
+  financialTransactionsCreated   FinancialTransaction[] @relation("FinancialTransactionCreatedBy")
+  /// Every FinancialTransaction this user cancelled (as distinct from
+  /// created) — see FinancialTransaction.cancelledById.
+  financialTransactionsCancelled FinancialTransaction[] @relation("FinancialTransactionCancelledBy")
+  auditLogs                      AuditLog[]
+  stockMovements                 StockMovement[]
+
+  @@index([projectId, isActive])
+}
+
+/// One login "family". A JWT access token's `sid` claim references this
+/// row's id; every authenticated request re-checks it here (never trusts a
+/// cached/stale JWT claim for revocation/expiry) — see
+/// docs/backend-architecture.md §9 and docs/adr/0009-per-request-session-revalidation.md.
+model RefreshSession {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @db.Uuid
+  user             User      @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdAt        DateTime  @default(now()) @db.Timestamptz(6)
+  expiresAt        DateTime  @db.Timestamptz(6)
+  revokedAt        DateTime? @db.Timestamptz(6)
+  revocationReason String?
+
+  refreshTokens RefreshToken[]
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+}
+
+/// One row per issued refresh secret. Only `tokenHash` (SHA-256 of the raw
+/// secret) is ever stored — see docs/adr/0010-refresh-token-hash-lookup.md
+/// for why a fast deterministic hash with a unique index is the correct
+/// choice here (unlike passwordHash, which must be slow/salted).
+model RefreshToken {
+  id            String         @id @default(uuid()) @db.Uuid
+  sessionId     String         @db.Uuid
+  session       RefreshSession @relation(fields: [sessionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  tokenHash     String         @unique
+  createdAt     DateTime       @default(now()) @db.Timestamptz(6)
+  expiresAt     DateTime       @db.Timestamptz(6)
+  /// Set exactly once, atomically, when this token is rotated (or reused —
+  /// see the atomic-rotation and replay-detection design in
+  /// docs/transaction-design.md's auth addendum). Never unset.
+  consumedAt    DateTime?      @db.Timestamptz(6)
+  replacedById  String?        @unique @db.Uuid
+  replacedBy    RefreshToken?  @relation("RefreshTokenReplacement", fields: [replacedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  replacementOf RefreshToken?  @relation("RefreshTokenReplacement")
+
+  @@index([sessionId, createdAt])
+}
+
+/// A named building within one project (docs/backend-data-model.md's
+/// approved shape: `name` for display, `code` for the stable per-project
+/// identifier). `@@unique([projectId, id])` exists solely so Floor can
+/// composite-FK against this table — see docs/backend-data-model.md's
+/// "project-owned parents expose @@unique([projectId, id])" convention,
+/// which is what makes a URL/body project+block mismatch a database-level
+/// impossibility, not just an application-level check (Phase 3 §14).
+model BuildingBlock {
+  id        String   @id @default(uuid()) @db.Uuid
+  projectId String   @db.Uuid
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  name      String
+  code      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  floors Floor[]
+
+  @@unique([projectId, code])
+  @@unique([projectId, id])
+  @@index([projectId, isActive])
+}
+
+/// A level within one building block. `label` (not a bare integer) matches
+/// the approved model: real floors aren't always sequential numbers
+/// ("Ground", "Mezzanine", "Basement 1"); `sortOrder` carries display
+/// ordering independently. `projectId` is denormalized here (not just
+/// reachable via `block`) specifically so the FK below can be the composite
+/// `(projectId, blockId) -> BuildingBlock(projectId, id)` — the same
+/// database-level "wrong project's block" prevention as above, one level
+/// deeper. `@@unique([projectId, blockId, id])` exists so a later phase
+/// (e.g. Phase 8 write-offs) can composite-FK against a specific floor the
+/// same way, per docs/backend-data-model.md's StockWriteOff row.
+model Floor {
+  id        String        @id @default(uuid()) @db.Uuid
+  projectId String        @db.Uuid
+  blockId   String        @db.Uuid
+  block     BuildingBlock @relation(fields: [projectId, blockId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  label     String
+  sortOrder Int
+  isActive  Boolean       @default(true)
+  createdAt DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime      @updatedAt @db.Timestamptz(6)
+
+  @@unique([projectId, blockId, label])
+  @@unique([projectId, blockId, id])
+  @@index([projectId, blockId, sortOrder])
+}
+
+// -----------------------------------------------------------------------
+// Phase 4 — Financial Ledger (docs/transaction-design.md, docs/adr/0001,
+// 0003, 0005, 0006, 0008). Warehouses, materials, suppliers and purchases
+// are explicitly out of scope until their own phases.
+// -----------------------------------------------------------------------
+
+/// UZS is every project's home currency (the ledger's own unit of account,
+/// no rate needed). USD is the only other currency Phase 4 supports, and a
+/// USD row always carries an explicit `exchangeRate` captured at posting
+/// time — see docs/adr/0006-cross-currency-settlement-explicit-rate.md.
+enum Currency {
+  UZS
+  USD
+}
+
+/// Declares the full set approved in docs/backend-data-model.md even though
+/// Phase 4 implements posting workflows only for INCOME, EXPENSE and
+/// SALARY — PURCHASE/ADVANCE/DEBT_PAYMENT/REFUND/ADJUSTMENT exist so a later
+/// phase adds a workflow, not a migration. See this phase's hand-written
+/// "direction matches type" CHECK constraint.
+enum FinancialTransactionType {
+  INCOME
+  EXPENSE
+  SALARY
+  PURCHASE
+  ADVANCE
+  DEBT_PAYMENT
+  REFUND
+  ADJUSTMENT
+}
+
+/// Server-computed from `type` inside the service layer — never accepted
+/// from a request body.
+enum TransactionDirection {
+  IN
+  OUT
+}
+
+enum TransactionCategoryKind {
+  INCOME
+  EXPENSE
+}
+
+/// MANUAL: a user typed this rate in at posting time (Phase 4's only
+/// source). PROVIDER: reserved for a future automatic-rate-provider
+/// integration (explicitly deferred) so this column never needs a migration
+/// when that lands.
+enum RateSource {
+  MANUAL
+  PROVIDER
+}
+
+/// A project-scoped label for income/expense rows (e.g. "Materials",
+/// "Salaries", "Rent"). `kind` fixes whether a category applies to income or
+/// expense transactions; the posting service rejects a mismatch (a
+/// cross-table CHECK can't express this, so it's enforced app-side, not by
+/// the database). Categories are never deleted, only archived
+/// (`isActive = false`) — see FinancialTransaction.categoryNameSnapshot for
+/// why an archive/rename never disturbs historical rows.
+model TransactionCategory {
+  id        String                  @id @default(uuid()) @db.Uuid
+  projectId String                  @db.Uuid
+  project   Project                 @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  name      String
+  kind      TransactionCategoryKind
+  isActive  Boolean                 @default(true)
+  createdAt DateTime                @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime                @updatedAt @db.Timestamptz(6)
+
+  financialTransactions FinancialTransaction[]
+
+  @@unique([projectId, kind, name])
+  @@unique([projectId, id])
+  @@index([projectId, isActive])
+}
+
+/// The idempotency + posting-sequence record shared by every mutating
+/// finance (and, in later phases, inventory/purchase) operation — see
+/// docs/transaction-design.md §1 for the full locking/retry/idempotency
+/// protocol this backs. One `PostedOperation` corresponds to exactly one
+/// client-intended write; `sequence` is the value of `Project.postingSequence`
+/// at the moment this operation was posted, read and incremented inside the
+/// same `SELECT ... FOR UPDATE` transaction that creates this row — making
+/// `(projectId, sequence)` a total, gap-free-per-success order of every
+/// mutation ever posted to a project.
+///
+/// `kind` is a plain string, not an enum, deliberately: later phases
+/// (purchases, write-offs, ...) add new operation kinds, and a string lets
+/// that happen without a migration. Phase 4 only ever writes
+/// "financial_transaction.create" or "financial_transaction.cancel" here.
+///
+/// `requestHash` guards the "same idempotency key, different payload" case
+/// (docs/adr/0005-idempotency-key-required.md): a retried request must
+/// hash-match the original to be treated as a safe retry; a mismatch is a
+/// client bug, rejected with 409 — never silently accepted as a second
+/// operation, and never silently ignored.
+///
+/// `reversalOfId` is set only on the operation created by a cancellation,
+/// pointing back at the operation it reverses — this is the
+/// operation-level link; `FinancialTransaction.reversalOfId` is the
+/// row-level link, kept separately since a future operation kind may post
+/// (and later reverse) more than one ledger row.
+model PostedOperation {
+  id             String  @id @default(uuid()) @db.Uuid
+  projectId      String  @db.Uuid
+  project        Project @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  actorId        String  @db.Uuid
+  actor          User    @relation(fields: [actorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  kind           String
+  idempotencyKey String
+  requestHash    String
+
+  /// The caller-supplied business date this operation is dated to — see
+  /// FinancialTransaction.occurredAt's doc comment for the `@db.Date` /
+  /// timezone rationale, which applies identically here.
+  occurredAt DateTime @db.Date
+  postedAt   DateTime @default(now()) @db.Timestamptz(6)
+  sequence   BigInt
+
+  cancelledAt        DateTime? @db.Timestamptz(6)
+  cancellationReason String?
+
+  reversalOfId String?          @unique @db.Uuid
+  reversalOf   PostedOperation? @relation("PostedOperationReversal", fields: [reversalOfId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  reversedBy   PostedOperation? @relation("PostedOperationReversal")
+
+  financialTransactions FinancialTransaction[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, actorId, kind, idempotencyKey])
+  @@unique([projectId, sequence])
+  @@index([projectId, cancelledAt])
+}
+
+/// The append-only financial ledger row. Never hard-deleted; a mistaken
+/// entry is cancelled (`cancelledAt`/`cancellationReason`/`cancelledById`)
+/// and, for INCOME/EXPENSE/SALARY, reversed by posting an exact inverse row
+/// — docs/transaction-design.md §4.
+///
+/// Money fields are `Decimal`, never `Float` (docs/adr's Decimal
+/// convention, enforced project-wide). `amount` is always the positive
+/// magnitude in the row's own `currency`; `direction` (server-computed from
+/// `type`, never client input) says whether it moves money IN or OUT;
+/// `amountUzs` is the UZS-equivalent the project balance is actually
+/// computed from — `amount` verbatim for UZS rows, `amount * exchangeRate`
+/// rounded to 2dp (ROUND_HALF_UP) for USD rows — always server-computed,
+/// never client-supplied.
+///
+/// `occurredAt` is deliberately `@db.Date` (a calendar date, no time-of-day,
+/// no timezone) even though its name ends in "At": it is the *business*
+/// date this row is dated to (docs/transaction-design.md's occurred-vs-
+/// created distinction), interpreted in the owning Project's `timezone`
+/// wherever it is rendered or range-filtered, and is independent of
+/// `createdAt` (the real posting instant, Timestamptz, server clock).
+///
+/// `categoryId`, `rateId` and `operationId` are all composite-FK'd against
+/// `(projectId, id)` on their target table — the same "wrong project's
+/// child row" prevention already used for BuildingBlock/Floor (Phase 3) —
+/// so a category, rate or operation belonging to a *different* project can
+/// never be attached to this row; it's a database-level impossibility, not
+/// just an application-level check.
+model FinancialTransaction {
+  id          String                   @id @default(uuid()) @db.Uuid
+  projectId   String                   @db.Uuid
+  project     Project                  @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  operationId String                   @db.Uuid
+  operation   PostedOperation          @relation(fields: [projectId, operationId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  type        FinancialTransactionType
+  direction   TransactionDirection
+
+  amount       Decimal  @db.Decimal(24, 2)
+  currency     Currency
+  /// Always populated, never null (docs/backend-architecture.md §4: "For
+  /// UZS, exchangeRate = 1 and amountUzs = amount. For USD,
+  /// amountUzs = round2(amount * exchangeRate)") — exactly `1` for UZS
+  /// (server-set, never client input) and an explicit positive snapshot for
+  /// USD. Enforced by a hand-written CHECK constraint (Prisma cannot express
+  /// a cross-column conditional constraint natively; see docs/adr/0008).
+  /// Captured once at posting time and never recomputed later, even if
+  /// CurrencyRate later gains a corrected entry for the same day.
+  exchangeRate Decimal  @db.Decimal(24, 8)
+  amountUzs    Decimal  @db.Decimal(24, 2)
+
+  rateSource         RateSource    @default(MANUAL)
+  rateId             String?       @db.Uuid
+  rate               CurrencyRate? @relation(fields: [projectId, rateId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  /// Required whenever `exchangeRate` was typed in directly rather than
+  /// taken from a recorded CurrencyRate row (i.e. whenever `rateId` is
+  /// null on a USD row) — enforced by a hand-written CHECK constraint.
+  rateOverrideReason String?
+
+  categoryId           String?              @db.Uuid
+  category             TransactionCategory? @relation(fields: [projectId, categoryId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  /// Denormalized copy of `category.name` at posting time, so a later
+  /// category rename or archive never rewrites or hides the label on
+  /// historical rows.
+  categoryNameSnapshot String?
+
+  /// DB column name kept as `recipient` (Phase 0's approved shape) for both
+  /// income and expense rows; the Income DTO exposes this field as `source`
+  /// (who/what the money came from) — a service-layer API naming choice,
+  /// not a schema concept.
+  recipient String?
+  comment   String?
+
+  occurredAt DateTime @db.Date
+
+  createdById String   @db.Uuid
+  createdBy   User     @relation("FinancialTransactionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
+
+  cancelledAt        DateTime? @db.Timestamptz(6)
+  cancellationReason String?
+  cancelledById      String?   @db.Uuid
+  cancelledBy        User?     @relation("FinancialTransactionCancelledBy", fields: [cancelledById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  /// Set only on the exact-inverse row created by a cancellation; points
+  /// back at the row it reverses. `@unique` because a row can be reversed
+  /// at most once (re-cancelling the original is rejected, never
+  /// re-reversed).
+  reversalOfId String?               @unique @db.Uuid
+  reversalOf   FinancialTransaction? @relation("FinancialTransactionReversal", fields: [reversalOfId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  reversedBy   FinancialTransaction? @relation("FinancialTransactionReversal")
+
+  @@unique([projectId, id])
+  @@index([projectId, occurredAt])
+  @@index([projectId, type])
+  @@index([projectId, categoryId])
+  @@index([projectId, cancelledAt])
+  @@index([operationId])
+}
+
+/// An append-only record of "1 unit of `currency` was worth `rateUzs` UZS,
+/// effective on `effectiveOn`". Deliberately not unique per
+/// `(projectId, currency, effectiveOn)`: correcting a mistyped rate means
+/// inserting a new row, never editing or deleting the old one (this is a
+/// ledger, not a lookup table) — the *latest* row for a given day is
+/// authoritative at posting time, selected by `ORDER BY createdAt DESC
+/// LIMIT 1`.
+model CurrencyRate {
+  id          String     @id @default(uuid()) @db.Uuid
+  projectId   String     @db.Uuid
+  project     Project    @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// The non-UZS side of the rate (Phase 4: always USD — see the Currency
+  /// enum). Named `currency`, not `fromCurrency`/`toCurrency`, since UZS is
+  /// always the implicit other side, project-wide.
+  currency    Currency
+  rateUzs     Decimal    @db.Decimal(24, 8)
+  effectiveOn DateTime   @db.Date
+  source      RateSource @default(MANUAL)
+  createdById String     @db.Uuid
+  createdBy   User       @relation(fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdAt   DateTime   @default(now()) @db.Timestamptz(6)
+
+  financialTransactions FinancialTransaction[]
+
+  @@unique([projectId, id])
+  @@index([projectId, currency, effectiveOn])
+}
+
+/// The minimal transactional audit writer docs/backend-architecture.md §10
+/// requires to exist "before the first financial posting in Phase 4"
+/// (transaction-design.md invariant #23: "no successful financial...
+/// operation without audit"). Deliberately narrow: a writer only, no read
+/// endpoint (`GET P/audit`) and no attachment integration — both stay
+/// Phase 9's job per that same section. Every row is written inside the
+/// exact same Prisma transaction as the business effect it records
+/// (`AuditService`, `src/modules/audit/`), so a failed audit insert rolls
+/// back the business write with it — ordinary Prisma transaction atomicity
+/// is relied on for this rather than a separate deferred-trigger check.
+///
+/// `previousData`/`newData` are safe (no secrets, only fields already
+/// returned by that entity's own response DTO) JSON snapshots of the
+/// affected row's *entire* state before/after the write, not a partial
+/// diff — `previousData` is null for a creation. Decimal fields inside them
+/// are strings, per docs/backend-architecture.md §10 ("Decimal snapshots
+/// are strings") — `Prisma.Decimal`'s own `toJSON()` already stringifies,
+/// so no special handling is needed at the call site beyond passing the
+/// same plain object the response DTO would return.
+model AuditLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  projectId    String   @db.Uuid
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  actorId      String   @db.Uuid
+  actor        User     @relation(fields: [actorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// e.g. "financial_transaction.create" / ".cancel" / ".comment_edit" — a
+  /// plain string, not an enum, for the same reason as `PostedOperation.kind`
+  /// (later phases add actions without a migration).
+  action       String
+  entityType   String
+  entityId     String   @db.Uuid
+  /// The `PostedOperation` this action belongs to, when there is one (every
+  /// Phase 4 finance action has one; a future non-operation-based audit
+  /// event could omit it).
+  operationId  String?  @db.Uuid
+  /// Correlates this row with the request-scoped ID the logging
+  /// interceptor/exception filter already attach to every response
+  /// (src/common/middleware/request-id.middleware.ts).
+  requestId    String?
+  previousData Json?
+  newData      Json
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([projectId, createdAt])
+  @@index([projectId, entityType, entityId])
+}
+
+// -----------------------------------------------------------------------
+// Phase 5 — Inventory foundation (docs/backend-data-model.md "Inventory
+// history and projection", docs/backend-architecture.md §2/§4). Supplier
+// workflows, purchases, write-off/transfer endpoints, block/floor
+// consumption, and inventory cancellation are explicitly out of scope until
+// their own phases — this phase lays down master data, the current-balance
+// projection, and the movement-ledger table's shape/invariants only.
+// -----------------------------------------------------------------------
+
+/// A project-scoped, extensible unit of measure (kg, m², piece, ...) — never
+/// a hardcoded enum (docs/backend-data-model.md: "no unit enum or
+/// conversion factor"). Seeded per project with sensible defaults
+/// (`prisma/seed.ts`, matching Phase 4's per-project TransactionCategory
+/// seeding precedent) and read-only over HTTP in Phase 5 — no
+/// PROJECT_MANAGER ad-hoc creation endpoint exists, since a unit is closer
+/// to system/reference configuration than day-to-day operational content a
+/// manager should freely add to.
+model Unit {
+  id        String   @id @default(uuid()) @db.Uuid
+  projectId String   @db.Uuid
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  name      String
+  symbol    String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  materials Material[]
+
+  @@unique([projectId, symbol])
+  @@unique([projectId, id])
+  @@index([projectId, isActive])
+}
+
+/// A project-scoped material classification (docs/backend-data-model.md).
+/// Unlike Warehouse/Material, this has no separate `code` column — `name`
+/// alone is the unique, stable per-project identifier.
+model MaterialCategory {
+  id        String   @id @default(uuid()) @db.Uuid
+  projectId String   @db.Uuid
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  materials Material[]
+
+  @@unique([projectId, name])
+  @@unique([projectId, id])
+  @@index([projectId, isActive])
+}
+
+/// A physical storage location within one project
+/// (docs/backend-data-model.md: `name` for display, `code` for the stable
+/// per-project identifier — the same shape as Phase 3's BuildingBlock).
+model Warehouse {
+  id        String   @id @default(uuid()) @db.Uuid
+  projectId String   @db.Uuid
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  name      String
+  code      String
+  comment   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  inventoryBalances InventoryBalance[]
+  stockMovements    StockMovement[]
+
+  @@unique([projectId, code])
+  @@unique([projectId, id])
+  @@index([projectId, isActive])
+}
+
+/// A project-scoped material master record (docs/backend-data-model.md).
+/// `categoryId`/`unitId` are composite-FK'd against `(projectId, id)` on
+/// their target tables — the same "wrong project's child row" prevention
+/// used since Phase 3's BuildingBlock/Floor — so a category or unit
+/// belonging to a *different* project can never be attached to a material;
+/// it's a database-level impossibility, not just an application check.
+///
+/// `unitId` (like `code`) has no PATCH path in Phase 5: both are treated as
+/// fixed at creation, anticipating docs/backend-data-model.md's "unit/
+/// project immutable after first movement" rule without yet building the
+/// "does a movement exist" check that rule literally depends on — no
+/// movement-creating workflow exists until Phase 7/8. `categoryId` carries
+/// no such restriction and may be corrected via PATCH at any time.
+model Material {
+  id        String  @id @default(uuid()) @db.Uuid
+  projectId String  @db.Uuid
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  name      String
+  code      String
+
+  categoryId String           @db.Uuid
+  category   MaterialCategory @relation(fields: [projectId, categoryId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  unitId     String           @db.Uuid
+  unit       Unit             @relation(fields: [projectId, unitId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  /// Same precision as `quantity` (Decimal(24,6), docs/backend-architecture.md
+  /// §4) — a threshold expressed in the material's own unit. Null disables
+  /// the low-stock warning; it is never itself "low stock"
+  /// (docs/backend-architecture.md §2: "Null threshold disables the
+  /// warning; equality is not low stock" — the derived `lowStock` flag uses
+  /// strict `<`, never `<=`).
+  minimumStock Decimal? @db.Decimal(24, 6)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(6)
+
+  inventoryBalances InventoryBalance[]
+  stockMovements    StockMovement[]
+
+  @@unique([projectId, code])
+  @@unique([projectId, id])
+  @@index([projectId, isActive, name])
+  @@index([projectId, categoryId])
+}
+
+/// The current fast-read projection of stock — NOT historical truth by
+/// itself (docs/backend-data-model.md: "Store authoritative quantity and
+/// value, deriving weighted average on read; there is no independently
+/// mutable average-cost column"). `StockMovement` is the immutable ledger;
+/// this table exists purely so a read doesn't have to re-aggregate the
+/// entire movement history every time. `averageCostUzs` is deliberately NOT
+/// a column here — it is always `valueUzs / quantity`, computed at the
+/// service layer and exactly `0` when `quantity` is `0` (see the
+/// zero-quantity CHECK constraint) — persisting it separately would create
+/// a second, driftable source of truth for the same number.
+///
+/// `warehouseId`/`materialId` are composite-FK'd against `(projectId, id)`
+/// on their target tables, making "this warehouse and material belong to
+/// different projects" a database-level impossibility, not just an
+/// application check (docs/backend-data-model.md's project-consistency
+/// requirement) — the same pattern as Phase 3's BuildingBlock/Floor and
+/// Phase 4's FinancialTransaction.
+///
+/// Deliberately omits `version`/`effectiveHeadId` from Phase 0's
+/// fully-elaborated design: both exist to support the effective-head
+/// cancellation mechanism (transaction-design.md §8), which has no
+/// consumer until a stock-mutating workflow exists (Phase 7/8) — the same
+/// "no speculative field with no reader" discipline `Project.postingSequence`
+/// followed before Phase 4 needed it.
+model InventoryBalance {
+  id        String  @id @default(uuid()) @db.Uuid
+  projectId String  @db.Uuid
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  warehouseId String    @db.Uuid
+  warehouse   Warehouse @relation(fields: [projectId, warehouseId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  materialId  String    @db.Uuid
+  material    Material  @relation(fields: [projectId, materialId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  /// Positive magnitude, never negative (CHECK constraint) —
+  /// docs/backend-architecture.md §2: "negative inventory... outside MVP."
+  quantity Decimal @db.Decimal(24, 6)
+  /// The carrying value of this balance in UZS, at 8 decimal places
+  /// (docs/backend-architecture.md §4: "Inventory carrying value and unit
+  /// cost snapshot | Decimal(30,8) | Retain 8 decimal places for
+  /// moving-cost operations") — deliberately more precise than money's 2dp,
+  /// so repeated weighted-average operations don't compound rounding error.
+  valueUzs Decimal @db.Decimal(30, 8)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  @@unique([warehouseId, materialId])
+  @@index([projectId, warehouseId])
+  @@index([projectId, materialId])
+}
+
+/// The fixed set of movement kinds approved in docs/backend-data-model.md.
+/// `PURCHASE_RECEIPT`/`WRITE_OFF`/`TRANSFER_OUT`/`TRANSFER_IN`/`REVERSAL`
+/// have no writer yet (Phase 7/8's job); `OPENING_RECEIPT` likewise has no
+/// writer in Phase 5 (introducing existing stock is its own audited
+/// workflow, out of this phase's scope) — all six are declared now so the
+/// enum itself doesn't need a migration when each workflow lands.
+enum StockMovementType {
+  OPENING_RECEIPT
+  PURCHASE_RECEIPT
+  WRITE_OFF
+  TRANSFER_OUT
+  TRANSFER_IN
+  REVERSAL
+}
+
+/// The immutable historical ledger of every stock change — the actual
+/// source of truth `InventoryBalance` merely projects for fast reads
+/// (docs/backend-data-model.md). No endpoint in Phase 5 writes this table
+/// (deliberately — this phase does not "expose dangerous arbitrary stock
+/// mutation endpoints merely because StockMovement exists"); it is created
+/// now, with its full constraint/immutability posture, so Phase 7/8's
+/// purchase-receipt/write-off/transfer workflows have a table — and a
+/// proven-correct set of invariants — to post into, rather than
+/// retrofitting both at once.
+///
+/// `direction` reuses the finance module's `TransactionDirection` enum
+/// (`IN`/`OUT`) rather than a second near-identical enum: the same "positive
+/// magnitude in `quantity`, direction explicit and server-computed, never a
+/// negative quantity" sign convention `FinancialTransaction` already uses
+/// for cash applies identically to stock (this phase's own instructions,
+/// §11).
+///
+/// Deliberately simpler than Phase 0's fully-elaborated `StockMovement`
+/// (`balanceId`, `effectiveHeadId`/`previousEffectiveMovementId`,
+/// `quantityBefore/After`, `valueBefore/After`, `reversalOfId`,
+/// `purchaseItemId`, `writeOffId`, `transferId`, `blockId`/`floorId`): none
+/// of those fields have a consumer yet, and `blockId`/`floorId` in
+/// particular belong on the separate `StockWriteOff` header Phase 0
+/// defines, not on `StockMovement` itself. Phase 7/8 extend this table with
+/// whatever that phase's actual algorithm needs via an ordinary additive
+/// migration.
+model StockMovement {
+  id        String  @id @default(uuid()) @db.Uuid
+  projectId String  @db.Uuid
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  warehouseId String    @db.Uuid
+  warehouse   Warehouse @relation(fields: [projectId, warehouseId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  materialId  String    @db.Uuid
+  material    Material  @relation(fields: [projectId, materialId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  type      StockMovementType
+  direction TransactionDirection
+
+  /// Always the positive magnitude — see the model's own doc comment on the
+  /// sign convention.
+  quantity     Decimal @db.Decimal(24, 6)
+  unitCostUzs  Decimal @db.Decimal(30, 8)
+  totalCostUzs Decimal @db.Decimal(30, 8)
+
+  occurredAt DateTime @db.Date
+
+  createdById String   @db.Uuid
+  createdBy   User     @relation(fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([projectId, occurredAt])
+  @@index([warehouseId, materialId, occurredAt])
+}

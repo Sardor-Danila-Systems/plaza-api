@@ -1,0 +1,180 @@
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Req,
+  Res,
+  UnauthorizedException,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiCookieAuth,
+  ApiForbiddenResponse,
+  ApiNoContentResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+  ApiUnauthorizedResponse,
+} from '@nestjs/swagger';
+// `import type`: Request/Response are interfaces with no runtime value
+// (Express doesn't `new` them) — isolatedModules + emitDecoratorMetadata
+// require this to be explicit so decorator metadata emits `Object` for
+// these parameters instead of attempting a nonexistent value reference.
+import type { Request, Response } from 'express';
+import { ErrorResponseDto } from '../../common/dto/error-response.dto.js';
+import { AppConfigService } from '../../config/app-config.service.js';
+import {
+  AUTH_COOKIE_PATH,
+  CSRF_TOKEN_COOKIE,
+  REFRESH_TOKEN_COOKIE,
+} from './auth.constants.js';
+import { AuthService } from './auth.service.js';
+import { CurrentUser } from './decorators/current-user.decorator.js';
+import { Public } from './decorators/public.decorator.js';
+import { AccessTokenResponseDto } from './dto/access-token-response.dto.js';
+import { LoginDto } from './dto/login.dto.js';
+import { LoginResponseDto } from './dto/login-response.dto.js';
+import { SafeUserDto } from './dto/safe-user.dto.js';
+import { AuthRateLimitGuard } from './guards/auth-rate-limit.guard.js';
+import { CsrfGuard } from './guards/csrf.guard.js';
+import type { AuthenticatedUser } from './types/authenticated-user.js';
+
+// Per-IP, per-minute. Generous enough that a legitimate user retrying a
+// mistyped password, or a client refreshing on every tab focus, never hits
+// it, while still meaningfully throttling scripted credential stuffing (see
+// AuthRateLimitGuard's class doc for what this is/isn't).
+const LOGIN_RATE_LIMIT = new AuthRateLimitGuard(50, 60_000);
+const REFRESH_RATE_LIMIT = new AuthRateLimitGuard(100, 60_000);
+
+@ApiTags('auth')
+@Controller('auth')
+export class AuthController {
+  constructor(
+    private readonly authService: AuthService,
+    private readonly config: AppConfigService,
+  ) {}
+
+  @Public()
+  @UseGuards(LOGIN_RATE_LIMIT)
+  @Post('login')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Authenticate with email and password' })
+  @ApiOkResponse({ type: LoginResponseDto })
+  @ApiUnauthorizedResponse({
+    description: 'Invalid credentials',
+    type: ErrorResponseDto,
+  })
+  @ApiForbiddenResponse({
+    description: 'Account is disabled (only returned after a correct password)',
+    type: ErrorResponseDto,
+  })
+  async login(
+    @Body() dto: LoginDto,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<LoginResponseDto> {
+    const result = await this.authService.login(dto.email, dto.password);
+    this.setAuthCookies(response, result.refreshSecret, result.csrfToken);
+
+    return {
+      accessToken: result.accessToken,
+      user: SafeUserDto.fromAuthenticatedUser({
+        id: result.user.id,
+        email: result.user.email,
+        displayName: result.user.displayName,
+        role: result.user.role,
+        projectId: result.user.projectId,
+        sessionId: '', // not part of the public user shape
+      }),
+    };
+  }
+
+  @Public()
+  @UseGuards(REFRESH_RATE_LIMIT, CsrfGuard)
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  @ApiCookieAuth('refresh_token')
+  @ApiOperation({
+    summary: 'Rotate the refresh token and issue a new access token',
+  })
+  @ApiOkResponse({ type: AccessTokenResponseDto })
+  @ApiUnauthorizedResponse({
+    description: 'Invalid, expired, or revoked refresh token',
+    type: ErrorResponseDto,
+  })
+  @ApiForbiddenResponse({
+    description: 'CSRF token mismatch, or account disabled',
+    type: ErrorResponseDto,
+  })
+  async refresh(
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<AccessTokenResponseDto> {
+    const refreshSecret: unknown = request.cookies?.[REFRESH_TOKEN_COOKIE];
+    if (typeof refreshSecret !== 'string' || refreshSecret.length === 0) {
+      throw new UnauthorizedException({
+        code: 'INVALID_REFRESH_TOKEN',
+        message: 'Missing refresh token',
+      });
+    }
+
+    const result = await this.authService.refresh(refreshSecret);
+    this.setAuthCookies(response, result.refreshSecret, result.csrfToken);
+    return { accessToken: result.accessToken };
+  }
+
+  @UseGuards(CsrfGuard)
+  @Post('logout')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Revoke the current session' })
+  @ApiNoContentResponse({ description: 'Session revoked' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiForbiddenResponse({
+    description: 'CSRF token mismatch',
+    type: ErrorResponseDto,
+  })
+  async logout(
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<void> {
+    await this.authService.logout(user.sessionId);
+    this.clearAuthCookies(response);
+  }
+
+  @Get('me')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Return the authenticated user' })
+  @ApiOkResponse({ type: SafeUserDto })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  me(@CurrentUser() user: AuthenticatedUser): SafeUserDto {
+    return SafeUserDto.fromAuthenticatedUser(user);
+  }
+
+  private setAuthCookies(
+    response: Response,
+    refreshSecret: string,
+    csrfToken: string,
+  ): void {
+    const cookieOptions = {
+      httpOnly: true,
+      secure: this.config.useSecureCookies,
+      sameSite: 'lax' as const,
+      path: AUTH_COOKIE_PATH,
+      maxAge: this.config.refreshTokenTtlMs,
+    };
+    response.cookie(REFRESH_TOKEN_COOKIE, refreshSecret, cookieOptions);
+    response.cookie(CSRF_TOKEN_COOKIE, csrfToken, {
+      ...cookieOptions,
+      httpOnly: false,
+    });
+  }
+
+  private clearAuthCookies(response: Response): void {
+    response.clearCookie(REFRESH_TOKEN_COOKIE, { path: AUTH_COOKIE_PATH });
+    response.clearCookie(CSRF_TOKEN_COOKIE, { path: AUTH_COOKIE_PATH });
+  }
+}

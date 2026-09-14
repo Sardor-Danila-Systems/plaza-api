@@ -1,21 +1,23 @@
 import { Module } from '@nestjs/common';
-import { createObserveModule } from '@nestjs/observe';
-import { AppController } from './app.controller.js';
-import { AppService } from './app.service.js';
-
-export const { ObserveModule, ObserveInstrument } = createObserveModule();
+import { ConfigModule } from './config/config.module.js';
+import { PrismaModule } from './database/prisma.module.js';
+import { AuditModule } from './modules/audit/audit.module.js';
+import { AuthModule } from './modules/auth/auth.module.js';
+import { ConstructionModule } from './modules/construction/construction.module.js';
+import { FinancesModule } from './modules/finances/finances.module.js';
+import { HealthModule } from './modules/health/health.module.js';
+import { ProjectsModule } from './modules/projects/projects.module.js';
 
 @Module({
   imports: [
-    // Distributed tracing, auto-correlated logs, request/job metrics, error
-    // telemetry, alarms, and more — out of the box. Sign up at https://observe.nestjs.com
-    ObserveModule.forRoot({
-      appKey: 'YOUR_APP_KEY',
-      appSecret: 'YOUR_APP_SECRET',
-      serviceId: 'plaza-backend',
-    }),
+    ConfigModule,
+    PrismaModule,
+    HealthModule,
+    AuthModule,
+    ProjectsModule,
+    ConstructionModule,
+    AuditModule,
+    FinancesModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
 })
 export class AppModule {}

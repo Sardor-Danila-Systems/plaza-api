@@ -1,0 +1,53 @@
+# PostgreSQL and Prisma transaction design research
+
+Researched on 2026-09-13 for Euro Plaza Phase 0. This is design evidence, not an implemented or tested transaction layer. Statements marked **Recommendation** are project design choices inferred from the cited capabilities.
+
+## Version boundary
+
+Prisma's current release-status page identifies ORM 8 as a release candidate, with unversioned `prisma` installs selecting its CLI. The release candidate currently lacks configurable transaction isolation and the `P2002` family of error codes; it does not use the v7 `schema.prisma`, `generate`, or `migrate dev` workflow. The same page identifies `@prisma/client` 7.10.0 as the supported v7 client. These facts are time-sensitive. [Prisma release status](https://www.prisma.io/docs/prisma-orm/release-status)
+
+**Recommendation:** target `prisma@7.10.0`, `@prisma/client@7.10.0`, and `@prisma/adapter-pg@7.10.0` for the initial implementation, using the v7 documentation and a committed lockfile. Recheck package metadata and compatibility in Phase 1 before installation. The 7.10.0 release specifically fixes PostgreSQL deadlock SQLSTATE `40P01` mapping to `P2034` in the PostgreSQL adapters. Its CLI prefers `prisma7.config.ts`, while existing `prisma.config.ts` remains supported. [Prisma 7.10.0 release](https://github.com/prisma/orm/releases/tag/7.10.0)
+
+Prisma 7's upgrade guide specifies Node.js 20.19.0 and TypeScript 5.4.0 as minimums, ESM packaging, an explicit generated-client output, and a driver adapter for direct PostgreSQL connections. Adapter connection-pool defaults come from the underlying driver. **Recommendation:** retain this repository's ESM direction, verify its Node/TypeScript/Nest combination by compilation and application startup, and configure pool/connection timeouts explicitly. A published minimum does not prove compatibility with every newer compiler. [Prisma v7 upgrade guide](https://www.prisma.io/docs/guides/upgrade-prisma-orm/v7)
+
+## Atomicity and retries
+
+Prisma v7 supports interactive `$transaction(async tx => ...)` for read/modify/write workflows and a `Serializable` isolation option. Its documentation directs applications to retry `P2034` write-conflict/deadlock failures. All queries in one transaction share a connection; `Promise.all` does not execute them concurrently on that connection. [Prisma v7 transactions](https://docs.prisma.io/docs/orm/v7/prisma-client/queries/transactions)
+
+PostgreSQL defaults to Read Committed, where successive statements may see different committed snapshots. Serializable protects committed transactions against serialization anomalies, but an application must retry the entire failed transaction, including decisions made from its reads. Serialization failures use SQLSTATE `40001`; overlapping serializable transactions can also encounter unique violations. [PostgreSQL isolation](https://www.postgresql.org/docs/18/transaction-iso.html)
+
+**Recommendation:** use one serializable interactive transaction for each posting or reversal, including project authorization revalidation, all ledger records, inventory projection updates, supplier allocations, and the success audit entry. Pass only its transaction client into participating business methods. Throw on any invariant failure; return success only after commit.
+
+**Recommendation:** place a bounded retry loop outside `$transaction`, with fresh reads, lock acquisition and calculations on every attempt, jittered backoff, and a total request deadline. Retry the selected adapter's verified serialization/deadlock errors; never retry all database errors indiscriminately. Map exhausted contention to an explicit retryable application error. Check the specific unique constraint for idempotency races; a duplicate business reference is not automatically transient.
+
+**Recommendation:** require a project/actor/operation-scoped idempotency key for posting APIs; persist its request hash and result reference atomically with the business operation. A retry with the same payload returns the committed operation; key reuse with a different payload conflicts. Resolve a duplicate-key race using a fresh transaction after rollback. Keep upload, rate-provider, notification and other external calls outside the retryable callback; only prepared input and database work belong inside it.
+
+## Locks and missing rows
+
+`SELECT ... FOR UPDATE` locks retrieved rows until transaction end, blocks competing writers/lockers, and does not block ordinary readers. Under Repeatable Read or Serializable, locking a row modified since the transaction snapshot can fail. PostgreSQL recommends acquiring multiple locks in a consistent order and keeping transactions short to reduce deadlocks. [PostgreSQL explicit locking](https://www.postgresql.org/docs/18/explicit-locking.html)
+
+**Recommendation:** for MVP, every project mutation acquires its existing `Project` row with `FOR UPDATE` and increments `postingSequence` inside the serializable transaction before reading mutable business state. This single coordination point covers supplier allocations, inventory changes, cancellation eligibility and first creation of missing `InventoryBalance` rows. Locking a nonexistent balance row provides no row lock. Keep the unique `(warehouseId, materialId)` constraint as a separate final safeguard. The project protocol coordinates participating workflows, not arbitrary SQL that bypasses it.
+
+**Recommendation:** acquire the project lock before any business-row locks; both endpoints of an MVP warehouse transfer belong to that same project. Finer supplier, warehouse or material locks are a later optimization only, justified by measured contention. That optimization must define a global table order and sorted immutable IDs, including opposite-direction transfers and missing-balance coordination. Serializable retries remain necessary after lock waits: a lock does not refresh an existing transaction snapshot, and the sequence increment makes each project mutation update the coordination row.
+
+Prisma offers tagged-template `$queryRaw` / `Prisma.sql` parameter binding. Constructing SQL from untrusted strings can still introduce injection. **Recommendation:** keep fixed SQL templates for the project-row lock, bind the project ID as a value, and invoke them through the active transaction client. [Prisma v7 raw queries](https://www.prisma.io/docs/orm/v7/prisma-client/using-raw-sql/raw-queries)
+
+## Database constraints beyond the Prisma model
+
+Prisma supports multi-field relations through `@relation(fields: [...], references: [...])`. PostgreSQL foreign keys can reference primary keys or suitable unique keys. **Recommendation:** give project-owned parents a unique `(projectId, id)` key and use compound foreign keys for child references; this prevents a child with project A from referencing project B's supplier, warehouse, material, purchase, or floor. Validate the complete proposed relation graph with the pinned Prisma CLI in Phase 1. [Prisma multi-field relations](https://docs.prisma.io/docs/orm/prisma-schema/data-model/relations/one-to-many-relations), [PostgreSQL constraints](https://www.postgresql.org/docs/18/ddl-constraints.html)
+
+A PostgreSQL `CHECK` is satisfied by true or null, and cannot safely enforce conditions against changing rows in other tables. Prisma's introspection documentation lists CHECK and deferred constraints among features not fully represented by its schema language; Prisma's own schema explanation also places triggers in SQL. **Recommendation:** combine explicit NOT NULL, foreign keys and unique constraints with named SQL CHECK constraints for row-local bounds and compatible field combinations. Keep SQL additions in reviewed migrations and test that replay preserves them. [PostgreSQL CHECK limitations](https://www.postgresql.org/docs/18/ddl-constraints.html#DDL-CONSTRAINTS-CHECK-CONSTRAINTS), [Prisma introspection](https://docs.prisma.io/docs/orm/prisma-schema/introspection), [Prisma schema boundary](https://www.prisma.io/blog/prisma-schema-as-llm-context)
+
+PostgreSQL constraint triggers must be `AFTER ROW` triggers on ordinary tables and can be deferred until transaction end. Their `WHEN` condition is evaluated immediately, not at deferred execution, and cannot contain subqueries. **Recommendation:** use narrowly scoped deferred constraint triggers only where required to verify a final cross-row invariant, such as the two equal and opposite transfer legs; put the final-state query in the trigger function and cover every relevant mutation path. Deferral does not replace concurrency control or make arbitrary aggregate reads safe. [PostgreSQL CREATE TRIGGER](https://www.postgresql.org/docs/18/sql-createtrigger.html)
+
+## Decimal representation and rounding
+
+Prisma Decimal is backed by Decimal.js, whose `toJSON()` returns a string. Decimal.js supports explicit precision/rounding configuration and fixed-point string output; conversion to a JavaScript number can lose digits. [Prisma Decimal](https://docs.prisma.io/docs/orm/prisma-client/special-fields-and-types), [Decimal.js API](https://mikemcl.github.io/decimal.js/)
+
+PostgreSQL `numeric(p,s)` rounds incoming values to its declared scale and rejects values whose integer digits exceed the remaining precision. Its numeric type also has special non-finite values. **Recommendation:** require finite bounded decimal strings, reject excessive input scale before persistence, use Decimal arithmetic throughout, and declare money, quantity, exchange-rate and unit-cost scales explicitly. Do not rely on implicit database rounding as a business rule. [PostgreSQL numeric](https://www.postgresql.org/docs/18/datatype-numeric.html)
+
+**Recommendation:** serialize monetary/quantity fields explicitly as documented fixed-point strings in REST and audit payloads. Preserve each posting's original amount, currency, rate and UZS valuation. Use the original recorded quantities/values for reversals, and test weighted-average depletion and rounding residuals rather than reconstructing history using today's average or exchange rate.
+
+## Implementation evidence required later
+
+Phase 1 must validate the selected Prisma schema syntax, generator/config imports and migration replay on real PostgreSQL. Before financial/inventory phases pass, integration tests must force simultaneous first balance creation, competing write-offs, competing advance consumption, opposite-direction transfers, duplicate submissions and cancellation races. Verify committed histories reconcile with projections, errors contain no raw database details, and failed operations leave no partial business or success-audit records. These are proposed acceptance tests, not test results from this Phase 0 research.
