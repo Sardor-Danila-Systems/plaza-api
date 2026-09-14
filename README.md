@@ -1,13 +1,22 @@
 # Euro Plaza Management System — backend
 
 Backend API for Euro Plaza Group's construction project management system.
-**Current status: Phase 3 (real Project domain, construction structure)
-complete.** Finance/inventory/supplier/purchase business endpoints still do
-not exist — see [docs/backend-architecture.md](docs/backend-architecture.md)
-for the full phased plan and [docs/phase-0-review.md](docs/phase-0-review.md)
-for the design review and Phase 1/2/3 implementation findings.
-[CONTEXT.md](CONTEXT.md) is the domain glossary; hard-to-reverse decisions
-are recorded individually in [docs/adr/](docs/adr/).
+**Current status: Phases 0-12 complete** — authentication, projects/
+construction, the financial ledger, inventory (masters, purchases,
+write-offs, transfers), suppliers/debt/advances, audit (write + read),
+attachments (staged upload, local/S3 storage), analytics, XLSX reports, and
+a production-hardening pass are all implemented and covered by real
+PostgreSQL unit/e2e/concurrency/DB-constraint tests. See
+[docs/backend-architecture.md](docs/backend-architecture.md) for the full
+design and [docs/phase-0-review.md](docs/phase-0-review.md) for the
+original design review. [CONTEXT.md](CONTEXT.md) is the domain glossary;
+hard-to-reverse decisions are recorded individually in
+[docs/adr/](docs/adr/).
+
+Not implemented (explicitly out of scope through Phase 13 — see the final
+Phase 5-13 report for the complete list): a full audit-attachment UI beyond
+the REST API itself, and any frontend. There is no Phase 14+ work planned
+beyond this point without new instructions.
 
 ## Prerequisites
 
@@ -50,6 +59,11 @@ cp .env.example .env
 | `JWT_ISSUER`        | **yes**  | JWT `iss` claim, validated on every verification.                                       |
 | `JWT_AUDIENCE`      | **yes**  | JWT `aud` claim, validated on every verification.                                       |
 | `REFRESH_TOKEN_TTL` | no       | Refresh session absolute lifetime, e.g. `30d`. Defaults to `30d`.                        |
+| `STORAGE_DRIVER`     | no       | `local` \| `s3`. Defaults to `local`. See [Attachment storage](#attachment-storage) below.          |
+| `STORAGE_LOCAL_ROOT` | no       | Filesystem directory for the `local` driver. Defaults to `./storage/attachments`.        |
+| `S3_ENDPOINT` / `S3_REGION` / `S3_BUCKET` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` / `S3_FORCE_PATH_STYLE` | only for `s3` | Any S3-compatible endpoint (real AWS S3, MinIO, Supabase Storage). `S3_FORCE_PATH_STYLE=true` for MinIO/Supabase-style endpoints. |
+| `ATTACHMENT_MAX_SIZE_BYTES` | no | Per-file upload limit. Defaults to `10485760` (10 MiB).                                |
+| `ATTACHMENT_ORPHAN_TTL` | no    | How long a never-linked upload survives before the orphan-cleanup job may remove it. Defaults to `24h`. |
 
 Startup fails fast with a readable error if any variable is missing or
 malformed — see `src/config/env.validation.ts`. Real secrets never belong in
@@ -309,6 +323,24 @@ npm run format         # prettier --write
 npm run format:check   # prettier --check (used in CI)
 npm run typecheck      # tsc --noEmit
 ```
+
+## Attachment storage
+
+Two adapters behind one `StorageService` interface
+(`src/modules/attachments/storage/`): a local-filesystem adapter (default,
+for dev/test/single-box deployments) and an S3-compatible adapter (any
+provider that speaks the S3 API — real AWS S3, MinIO, Supabase Storage).
+Select via `STORAGE_DRIVER`. Files are staged `PENDING -> READY -> LINKED`
+(or `FAILED`) — see `docs/backend-architecture.md` §10 and
+`AttachmentsService`'s own doc comment for the exact state machine and why
+storage and PostgreSQL never share a transaction.
+
+Never-linked uploads (abandoned or failed) expire after
+`ATTACHMENT_ORPHAN_TTL` and become eligible for `AttachmentsCleanupService
+.cleanupExpired()`. **This is not wired to a live scheduler** — no
+scheduling dependency exists elsewhere in this codebase, so none was added
+for this one job. Call it periodically from a deployment-level cron (or via
+`@nestjs/schedule` if a scheduler is ever adopted for other reasons too).
 
 ## Project structure
 

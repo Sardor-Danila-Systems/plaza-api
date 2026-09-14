@@ -13,7 +13,27 @@ export interface DecimalStringOptions {
    * money/quantity/rate field in this system requires positivity except
    * where a caller explicitly opts out. */
   positive?: boolean;
+  /**
+   * Total significant digits allowed (integer + fractional combined) —
+   * matches the destination column's overall `Decimal(P, _)` precision.
+   * Every `@IsDecimalString`-validated column in this schema is
+   * `Decimal(24, N)`, so `24` is a safe default for all of them; pass a
+   * different value only for a field backed by a different precision.
+   *
+   * Found via direct testing (Phase 12 hardening pass), not merely
+   * suspected: before this bound existed, a client-supplied decimal with
+   * MORE integer digits than its destination column allows (e.g.
+   * `"999999999999999999999999999999.00"` against a `Decimal(24,2)`
+   * column) passed this validator — nothing here checked the integer
+   * part's length — reached PostgreSQL, and failed there with a raw
+   * `numeric field overflow`, which `AllExceptionsFilter`'s generic Prisma
+   * fallback then surfaced as an unclassified `500 DATABASE_ERROR` instead
+   * of the `400 VALIDATION_ERROR` this is actually a case of.
+   */
+  maxTotalDigits?: number;
 }
+
+const DEFAULT_MAX_TOTAL_DIGITS = 24;
 
 /**
  * Validates a JSON string as an exact decimal literal fit for
@@ -44,8 +64,13 @@ export function IsDecimalString(
             return false;
           }
           const [opts] = args.constraints as [DecimalStringOptions];
+          const maxIntegerDigits = Math.max(
+            1,
+            (opts.maxTotalDigits ?? DEFAULT_MAX_TOTAL_DIGITS) -
+              opts.maxDecimalPlaces,
+          );
           const pattern = new RegExp(
-            `^(0|[1-9]\\d*)(\\.\\d{1,${opts.maxDecimalPlaces}})?$`,
+            `^(0|[1-9]\\d{0,${maxIntegerDigits - 1}})(\\.\\d{1,${opts.maxDecimalPlaces}})?$`,
           );
           if (!pattern.test(value)) {
             return false;
@@ -59,10 +84,12 @@ export function IsDecimalString(
           const [opts] = args.constraints as [DecimalStringOptions];
           const positivity =
             opts.positive === false ? 'a non-negative' : 'a positive';
+          const totalDigits = opts.maxTotalDigits ?? DEFAULT_MAX_TOTAL_DIGITS;
           return (
             `${args.property} must be ${positivity} decimal string with at ` +
-            `most ${opts.maxDecimalPlaces} fractional digit(s), no sign, ` +
-            'and no exponent notation'
+            `most ${opts.maxDecimalPlaces} fractional digit(s), at most ` +
+            `${totalDigits} significant digits in total, no sign, and no ` +
+            'exponent notation'
           );
         },
       },

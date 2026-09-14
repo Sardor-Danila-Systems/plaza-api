@@ -138,4 +138,34 @@ describe('IsDecimalString', () => {
     dto.amount = '-1';
     expect(await isValid(dto)).toBe(false);
   });
+
+  describe('maxTotalDigits (Phase 12 hardening)', () => {
+    it('accepts a value at the default 24-total-digit limit (22 integer + 2 fractional)', async () => {
+      const dto = new MoneyDto();
+      dto.amount = '9999999999999999999999.99';
+      expect(await isValid(dto)).toBe(true);
+    });
+
+    it('rejects a value with one more integer digit than the default 24-digit total allows — the exact case that used to reach PostgreSQL as a raw numeric overflow', async () => {
+      const dto = new MoneyDto();
+      dto.amount = '99999999999999999999999.99';
+      expect(await isValid(dto)).toBe(false);
+    });
+
+    it('rejects an extreme value regardless of magnitude', async () => {
+      const dto = new MoneyDto();
+      dto.amount = '999999999999999999999999999999.00';
+      expect(await isValid(dto)).toBe(false);
+    });
+
+    it('honors an explicit maxTotalDigits override', async () => {
+      class WideDto {
+        @IsDecimalString({ maxDecimalPlaces: 8, maxTotalDigits: 30 })
+        value!: string;
+      }
+      const dto = new WideDto();
+      dto.value = '99999999999999999999.12345678'; // 22 integer + 8 fractional = 30
+      expect(await isValid(dto)).toBe(true);
+    });
+  });
 });

@@ -89,6 +89,7 @@ model Project {
   settlementAllocations SettlementAllocation[]
   stockWriteOffs        StockWriteOff[]
   warehouseTransfers    WarehouseTransfer[]
+  attachments           Attachment[]
 
   @@index([isActive])
 }
@@ -136,6 +137,7 @@ model User {
   stockWriteOffsCancelled        StockWriteOff[]        @relation("StockWriteOffCancelledBy")
   warehouseTransfersCreated      WarehouseTransfer[]    @relation("WarehouseTransferCreatedBy")
   warehouseTransfersCancelled    WarehouseTransfer[]    @relation("WarehouseTransferCancelledBy")
+  attachmentsUploaded            Attachment[]
 
   @@index([projectId, isActive])
 }
@@ -473,6 +475,8 @@ model FinancialTransaction {
   /// other project-scoped child reference in this schema.
   supplierPaymentId String?          @unique @db.Uuid
   supplierPayment   SupplierPayment? @relation(fields: [projectId, supplierPaymentId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  attachments Attachment[]
 
   @@unique([projectId, id])
   @@unique([projectId, supplierPaymentId])
@@ -897,6 +901,7 @@ model StockWriteOff {
   @@index([projectId, floorId])
   @@index([projectId, materialId])
   @@index([projectId, warehouseId])
+  @@index([projectId, occurredAt])
 }
 
 /// A transfer's header — one row, two `StockMovement` legs
@@ -1051,12 +1056,14 @@ model Purchase {
 
   items                 PurchaseItem[]
   settlementAllocations SettlementAllocation[]
+  attachments           Attachment[]
 
   @@unique([operationId])
   @@unique([projectId, id])
   @@unique([projectId, supplierId, id])
   @@index([projectId, supplierId])
   @@index([projectId, warehouseId])
+  @@index([projectId, occurredAt])
 }
 
 /// One material line on a purchase — immutable once posted (Phase 7 never
@@ -1133,6 +1140,7 @@ model SupplierPayment {
   financialTransaction  FinancialTransaction?
   fundedAdvance         SupplierAdvance?
   settlementAllocations SettlementAllocation[]
+  attachments           Attachment[]
 
   @@unique([operationId])
   @@unique([projectId, id])
@@ -1238,4 +1246,86 @@ model SettlementAllocation {
   @@index([projectId, purchaseId])
   @@index([projectId, advanceId])
   @@index([projectId, fundingPaymentId])
+}
+
+// -----------------------------------------------------------------------
+// Phase 9 — Audit read side (ADR 0016) + Attachments
+// (docs/backend-architecture.md §10)
+// -----------------------------------------------------------------------
+
+/// Staged-upload lifecycle (docs/backend-architecture.md §10: "Storage and
+/// PostgreSQL cannot share a transaction. Use staged uploads with
+/// PENDING -> READY -> LINKED or FAILED, expiry, and an orphan cleanup
+/// job."). `PENDING` exists only for the brief window between the DB row's
+/// creation and the storage upload's own completion within one request —
+/// this MVP does not expose a separate "begin upload" HTTP step.
+enum AttachmentStatus {
+  PENDING
+  READY
+  LINKED
+  FAILED
+}
+
+/// A verified file (image or PDF) optionally linked to exactly one business
+/// record. "Exactly one target" is enforced by a hand-written CHECK
+/// constraint keyed off `status`: no target while `PENDING`/`READY`/
+/// `FAILED`, exactly one while `LINKED` (docs/backend-architecture.md §10:
+/// "real foreign keys to a purchase, financial transaction, or supplier
+/// payment, with exactly one target"). `financialTransactionId` is
+/// service-restricted to `INCOME`/`EXPENSE` rows only ("Permit income/
+/// expense finance targets, purchase targets, and supplier payments") — not
+/// itself expressible as a CHECK constraint (that would require a
+/// cross-table lookup), so the service layer is this rule's only
+/// enforcement point.
+model Attachment {
+  id        String           @id @default(uuid()) @db.Uuid
+  projectId String           @db.Uuid
+  project   Project          @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  status    AttachmentStatus @default(PENDING)
+
+  /// Server-generated opaque key (docs/backend-architecture.md §10: "Storage
+  /// keeps generated opaque keys and private access; no client-supplied
+  /// filesystem paths") — never derived from `originalFilename`.
+  storageKey       String @unique
+  /// Sanitized at upload time (path separators/control characters stripped,
+  /// length-bounded) — used only for the download response's
+  /// Content-Disposition header, never as a storage path.
+  originalFilename String
+  /// The SNIFFED content type (magic-byte signature, `file-type` package),
+  /// never the client-declared `Content-Type` header or file extension —
+  /// docs/backend-architecture.md §10: "verify size, content signatures and
+  /// allowed media type, not just extension."
+  mimeType         String
+  sizeBytes        Int
+
+  uploadedById String   @db.Uuid
+  uploadedBy   User     @relation(fields: [uploadedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+
+  readyAt       DateTime? @db.Timestamptz(6)
+  linkedAt      DateTime? @db.Timestamptz(6)
+  failedAt      DateTime? @db.Timestamptz(6)
+  failureReason String?
+
+  /// Null once `LINKED` (a linked attachment is retained forever with its
+  /// business record — "Retain links and files with cancelled records" —
+  /// and is no longer a cleanup-job candidate). Set at creation for
+  /// `PENDING`/`READY`/`FAILED` rows so the orphan cleanup job has a
+  /// deterministic cutoff.
+  expiresAt DateTime? @db.Timestamptz(6)
+
+  purchaseId String?   @db.Uuid
+  purchase   Purchase? @relation(fields: [projectId, purchaseId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  financialTransactionId String?               @db.Uuid
+  financialTransaction   FinancialTransaction? @relation(fields: [projectId, financialTransactionId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  supplierPaymentId String?          @db.Uuid
+  supplierPayment   SupplierPayment? @relation(fields: [projectId, supplierPaymentId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([projectId, status])
+  @@index([projectId, purchaseId])
+  @@index([projectId, financialTransactionId])
+  @@index([projectId, supplierPaymentId])
+  @@index([status, expiresAt])
 }

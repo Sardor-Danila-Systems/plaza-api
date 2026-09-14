@@ -31,6 +31,7 @@
     "provision": "node dist/cli/provision.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1131.0",
     "@nestjs/common": "^12.0.1",
     "@nestjs/config": "^12.0.0",
     "@nestjs/core": "^12.0.1",
@@ -44,7 +45,10 @@
     "class-validator": "^0.14.4",
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.4.2",
+    "exceljs": "^4.4.0",
+    "file-type": "^22.1.0",
     "helmet": "^8.3.0",
+    "multer": "^2.4.0",
     "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
@@ -59,6 +63,7 @@
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.0",
     "@types/jest": "^30.0.0",
+    "@types/multer": "^2.2.0",
     "@types/node": "^24.0.0",
     "@types/supertest": "^7.0.0",
     "jest": "^30.5.1",
@@ -74,6 +79,7 @@
     "deepmerge-ts": "8.0.2",
     "mysql2": "3.24.4",
     "tmp": "0.2.7",
-    "undici": "6.28.1"
+    "undici": "6.28.1",
+    "uuid": "11.1.1"
   }
 }

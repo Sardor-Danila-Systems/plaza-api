@@ -266,6 +266,32 @@ describe('Finances (e2e)', () => {
       }
     });
 
+    it('rejects an amount with more integer digits than its Decimal(24,2) column allows, as a clean 400 — not a raw 500 from a PostgreSQL numeric overflow (Phase 12 hardening)', async () => {
+      const { project, token } = await setupProjectAndManager();
+      try {
+        const response = await request(app.getHttpServer())
+          .post(`/projects/${project.id}/finances`)
+          .set('Authorization', `Bearer ${token}`)
+          .set('Idempotency-Key', idem())
+          .send({
+            type: 'INCOME',
+            amount: '999999999999999999999999999999.00',
+            currency: 'UZS',
+            source: 'x',
+            occurredAt: '2026-09-14',
+          })
+          .expect(400);
+        expect(response.body.code).toBe('VALIDATION_ERROR');
+
+        const count = await prisma.client.financialTransaction.count({
+          where: { projectId: project.id },
+        });
+        expect(count).toBe(0);
+      } finally {
+        await deleteTestProject(prisma.client, project.id);
+      }
+    });
+
     it('rejects a negative amount', async () => {
       const { project, token } = await setupProjectAndManager();
       try {

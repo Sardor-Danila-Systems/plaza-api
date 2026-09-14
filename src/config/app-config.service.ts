@@ -84,4 +84,50 @@ export class AppConfigService {
   get useSecureCookies(): boolean {
     return this.isProduction;
   }
+
+  // --- Phase 9: attachment storage ---
+
+  get storageDriver(): 'local' | 's3' {
+    return this.configService.get('STORAGE_DRIVER', { infer: true });
+  }
+
+  get storageLocalRoot(): string {
+    return this.configService.get('STORAGE_LOCAL_ROOT', { infer: true });
+  }
+
+  get s3Endpoint(): string | undefined {
+    return this.configService.get('S3_ENDPOINT', { infer: true });
+  }
+
+  get s3Region(): string | undefined {
+    return this.configService.get('S3_REGION', { infer: true });
+  }
+
+  get s3Bucket(): string | undefined {
+    return this.configService.get('S3_BUCKET', { infer: true });
+  }
+
+  get s3AccessKeyId(): string | undefined {
+    return this.configService.get('S3_ACCESS_KEY_ID', { infer: true });
+  }
+
+  get s3SecretAccessKey(): string | undefined {
+    return this.configService.get('S3_SECRET_ACCESS_KEY', { infer: true });
+  }
+
+  get s3ForcePathStyle(): boolean {
+    return (
+      this.configService.get('S3_FORCE_PATH_STYLE', { infer: true }) === 'true'
+    );
+  }
+
+  get attachmentMaxSizeBytes(): number {
+    return this.configService.get('ATTACHMENT_MAX_SIZE_BYTES', { infer: true });
+  }
+
+  get attachmentOrphanTtlMs(): number {
+    return parseDurationMs(
+      this.configService.get('ATTACHMENT_ORPHAN_TTL', { infer: true }),
+    );
+  }
 }

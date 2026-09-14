@@ -104,6 +104,66 @@ class EnvironmentVariables {
       'REFRESH_TOKEN_TTL must look like "30d", "12h", "1440m", or "2592000s"',
   })
   REFRESH_TOKEN_TTL: string = '30d';
+
+  // --- Phase 9: attachment storage ---
+
+  /** `local` (default — a plain filesystem directory, for dev/test/single-box
+   * deployments) or `s3` (any S3-compatible endpoint — real AWS S3, MinIO,
+   * Supabase Storage — docs/backend-architecture.md §10: "a real
+   * local-filesystem development adapter and a real S3-compatible
+   * deployment adapter behind the small storage interface"). */
+  @IsOptional()
+  @IsEnum(['local', 's3'] as const)
+  STORAGE_DRIVER: 'local' | 's3' = 'local';
+
+  /** Only read when `STORAGE_DRIVER=local`. Relative paths resolve against
+   * the process's current working directory. */
+  @IsOptional()
+  @IsString()
+  STORAGE_LOCAL_ROOT: string = './storage/attachments';
+
+  @IsOptional()
+  @IsString()
+  S3_ENDPOINT?: string;
+
+  @IsOptional()
+  @IsString()
+  S3_REGION?: string;
+
+  @IsOptional()
+  @IsString()
+  S3_BUCKET?: string;
+
+  @IsOptional()
+  @IsString()
+  S3_ACCESS_KEY_ID?: string;
+
+  @IsOptional()
+  @IsString()
+  S3_SECRET_ACCESS_KEY?: string;
+
+  /** `true` for MinIO/Supabase-style endpoints that expect
+   * `https://host/bucket/key` rather than AWS's own `https://bucket.host/key`
+   * virtual-hosted addressing. */
+  @IsOptional()
+  @IsEnum(['true', 'false'] as const)
+  S3_FORCE_PATH_STYLE?: 'true' | 'false';
+
+  /** Upper bound on one uploaded attachment (docs/backend-architecture.md
+   * §10: "up to a configured limit (initially 10 MiB)"). */
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  ATTACHMENT_MAX_SIZE_BYTES: number = 10 * 1024 * 1024;
+
+  /** How long a never-linked (`PENDING`/`READY`/`FAILED`) attachment may
+   * exist before the orphan cleanup job may remove it. */
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d+[smhd]$/, {
+    message: 'ATTACHMENT_ORPHAN_TTL must look like "24h", "7d", or "3600s"',
+  })
+  ATTACHMENT_ORPHAN_TTL: string = '24h';
 }
 
 /**

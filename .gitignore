@@ -4,6 +4,10 @@
 /build
 *.tsbuildinfo
 
+# Local-driver attachment storage (Phase 9) — never committed; see
+# STORAGE_LOCAL_ROOT in .env.example.
+/storage
+
 # Logs
 logs
 *.log

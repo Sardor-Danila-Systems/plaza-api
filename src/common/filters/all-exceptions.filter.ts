@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { MulterError } from 'multer';
 import { Prisma } from '../../generated/prisma/client.js';
 
 interface ErrorBody {
@@ -71,6 +72,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
       return this.fromHttpException(exception);
     }
 
+    const multerError = this.fromMulterError(exception);
+    if (multerError) {
+      return multerError;
+    }
+
     const prismaError = this.fromPrismaError(exception);
     if (prismaError) {
       return prismaError;
@@ -115,6 +121,38 @@ export class AllExceptionsFilter implements ExceptionFilter {
       typeof body.code === 'string' ? body.code : this.defaultCode(statusCode);
 
     return { statusCode, error, code, message };
+  }
+
+  /**
+   * `multer` (Phase 9's file-upload interceptor) throws a plain `MulterError`
+   * — never a Nest `HttpException` — when a request violates the configured
+   * upload limits, before any controller/service code runs at all. Mapped
+   * here, once, so every upload endpoint gets a clean 4xx rather than this
+   * filter's generic 500 fallback.
+   */
+  private fromMulterError(exception: unknown): {
+    statusCode: number;
+    error: string;
+    code: string;
+    message: string | string[];
+  } | null {
+    if (!(exception instanceof MulterError)) {
+      return null;
+    }
+    if (exception.code === 'LIMIT_FILE_SIZE') {
+      return {
+        statusCode: HttpStatus.PAYLOAD_TOO_LARGE,
+        error: 'Payload Too Large',
+        code: 'FILE_TOO_LARGE',
+        message: 'The uploaded file exceeds the maximum allowed size',
+      };
+    }
+    return {
+      statusCode: HttpStatus.BAD_REQUEST,
+      error: 'Bad Request',
+      code: 'VALIDATION_ERROR',
+      message: 'The uploaded file could not be processed',
+    };
   }
 
   /**
@@ -203,6 +241,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
         return 'CONFLICT';
       case HttpStatus.TOO_MANY_REQUESTS:
         return 'TOO_MANY_REQUESTS';
+      case HttpStatus.PAYLOAD_TOO_LARGE:
+        return 'FILE_TOO_LARGE';
       default:
         return statusCode >= 500
           ? 'INTERNAL_SERVER_ERROR'

@@ -89,6 +89,10 @@ export async function deleteTestUser(
   const userFilter = {
     OR: [{ createdById: userId }, { cancelledById: userId }],
   };
+  // Attachment (Phase 9) references Project/User/Purchase/
+  // FinancialTransaction/SupplierPayment, so it must be cleared first —
+  // nothing else references an Attachment back.
+  await prisma.attachment.deleteMany({ where: { uploadedById: userId } });
   await prisma.financialTransaction.deleteMany({
     where: { ...userFilter, reversalOfId: { not: null } },
   });
@@ -400,6 +404,10 @@ export async function deleteTestProject(
   projectId: string,
 ): Promise<void> {
   await prisma.auditLog.deleteMany({ where: { projectId } });
+  // Attachment (Phase 9) references Project/User/Purchase/
+  // FinancialTransaction/SupplierPayment, so it must be cleared before any
+  // of those — nothing else references an Attachment back.
+  await prisma.attachment.deleteMany({ where: { projectId } });
   await prisma.financialTransaction.deleteMany({
     where: { projectId, reversalOfId: { not: null } },
   });
