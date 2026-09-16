@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -252,6 +253,58 @@ export class AuthService {
     await this.revokeSession(sessionId, 'LOGOUT');
   }
 
+  /**
+   * The only self-service profile field. `displayName` carries no
+   * cross-row invariant (unlike email/role/projectId/isActive — see
+   * UpdateMeDto's doc comment), so a plain allowlisted update is
+   * sufficient; no transaction/audit machinery needed for this one field.
+   */
+  async updateDisplayName(userId: string, displayName: string): Promise<User> {
+    const user = await this.prisma.client.user.update({
+      where: { id: userId },
+      data: { displayName },
+    });
+    this.logger.log(`User ${userId} updated their display name`);
+    return user;
+  }
+
+  /**
+   * Verifies the caller's current password, then rotates it and signs the
+   * caller out of every OTHER session (their current device stays logged
+   * in — the safer default without forcing an immediate re-login on the
+   * device that just proved it knows both passwords).
+   */
+  async changePassword(
+    userId: string,
+    sessionId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<void> {
+    const user = await this.prisma.client.user.findUniqueOrThrow({
+      where: { id: userId },
+    });
+
+    const currentValid = await this.passwordService.verify(
+      user.passwordHash,
+      currentPassword,
+    );
+    if (!currentValid) {
+      throw new ConflictException({
+        code: 'INVALID_CURRENT_PASSWORD',
+        message: 'Current password is incorrect',
+      });
+    }
+
+    const newPasswordHash = await this.passwordService.hash(newPassword);
+    await this.prisma.client.user.update({
+      where: { id: userId },
+      data: { passwordHash: newPasswordHash },
+    });
+
+    await this.revokeAllOtherSessions(userId, sessionId, 'PASSWORD_CHANGE');
+    this.logger.log(`User ${userId} changed their password`);
+  }
+
   private async revokeSession(
     sessionId: string,
     reason: string,
@@ -261,6 +314,20 @@ export class AuthService {
     // `updateMany` simply matches zero rows the second time.
     await this.prisma.client.refreshSession.updateMany({
       where: { id: sessionId, revokedAt: null },
+      data: { revokedAt: new Date(), revocationReason: reason },
+    });
+  }
+
+  /** Same idiom as revokeSession, scoped to a user and excluding one
+   * session (the device making this request) — reuses the existing
+   * `@@index([userId, revokedAt])` on RefreshSession. */
+  private async revokeAllOtherSessions(
+    userId: string,
+    exceptSessionId: string,
+    reason: string,
+  ): Promise<void> {
+    await this.prisma.client.refreshSession.updateMany({
+      where: { userId, revokedAt: null, id: { not: exceptSessionId } },
       data: { revokedAt: new Date(), revocationReason: reason },
     });
   }

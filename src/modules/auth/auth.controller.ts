@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Patch,
   Post,
   Req,
   Res,
@@ -12,6 +13,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiConflictResponse,
   ApiCookieAuth,
   ApiForbiddenResponse,
   ApiNoContentResponse,
@@ -36,9 +38,11 @@ import { AuthService } from './auth.service.js';
 import { CurrentUser } from './decorators/current-user.decorator.js';
 import { Public } from './decorators/public.decorator.js';
 import { AccessTokenResponseDto } from './dto/access-token-response.dto.js';
+import { ChangePasswordDto } from './dto/change-password.dto.js';
 import { LoginDto } from './dto/login.dto.js';
 import { LoginResponseDto } from './dto/login-response.dto.js';
 import { SafeUserDto } from './dto/safe-user.dto.js';
+import { UpdateMeDto } from './dto/update-me.dto.js';
 import { AuthRateLimitGuard } from './guards/auth-rate-limit.guard.js';
 import { CsrfGuard } from './guards/csrf.guard.js';
 import type { AuthenticatedUser } from './types/authenticated-user.js';
@@ -152,6 +156,62 @@ export class AuthController {
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
   me(@CurrentUser() user: AuthenticatedUser): SafeUserDto {
     return SafeUserDto.fromAuthenticatedUser(user);
+  }
+
+  @Patch('me')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: "Update the authenticated user's own profile",
+    description:
+      'Self-service only — operates on req.user, no :userId param exists ' +
+      'to target another account. Allowlists displayName only; role, ' +
+      'projectId, isActive, and email are never accepted here.',
+  })
+  @ApiOkResponse({ type: SafeUserDto })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  async updateMe(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateMeDto,
+  ): Promise<SafeUserDto> {
+    const updated = await this.authService.updateDisplayName(
+      user.id,
+      dto.displayName,
+    );
+    return SafeUserDto.fromAuthenticatedUser({
+      id: updated.id,
+      email: updated.email,
+      displayName: updated.displayName,
+      role: updated.role,
+      projectId: updated.projectId,
+      sessionId: user.sessionId,
+    });
+  }
+
+  @Post('change-password')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: "Change the authenticated user's own password",
+    description:
+      'Verifies currentPassword first. On success, revokes every OTHER ' +
+      'refresh session for this user (this device/session stays logged in).',
+  })
+  @ApiNoContentResponse({ description: 'Password changed' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiConflictResponse({
+    description: 'INVALID_CURRENT_PASSWORD',
+    type: ErrorResponseDto,
+  })
+  async changePassword(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ChangePasswordDto,
+  ): Promise<void> {
+    await this.authService.changePassword(
+      user.id,
+      user.sessionId,
+      dto.currentPassword,
+      dto.newPassword,
+    );
   }
 
   private setAuthCookies(
