@@ -51,7 +51,7 @@ cp .env.example .env
 | `PORT`              | no       | HTTP port. Defaults to `3000`.                                                          |
 | `DATABASE_URL`      | **yes**  | PostgreSQL connection string (`postgres://` or `postgresql://`).                        |
 | `TEST_DATABASE_URL` | no       | Separate database used only by `npm run test:e2e` — see "Tests" below.                  |
-| `CORS_ORIGIN`       | no       | Comma-separated allowed origins. Empty/unset disables CORS entirely (the safe default). |
+| `CORS_ORIGIN`       | **yes, to use the frontend** | Comma-separated allowed origins, e.g. `http://localhost:3001` for local dev. Empty/unset disables CORS entirely — every browser request from the frontend is then silently rejected before it reaches any route. This is the single most common "works on my machine, not after a fresh clone" cause: `.env.example` ships a working local-dev value, but a `.env` copied from an older revision or edited by hand can lose it. |
 | `SWAGGER_ENABLED`   | no       | `true`/`false`. Defaults to enabled outside `production`.                               |
 | `LOG_LEVEL`         | no       | `error` \| `warn` \| `log` \| `debug` \| `verbose`. Defaults to `log`.                   |
 | `JWT_ACCESS_SECRET` | **yes**  | ≥32 random characters. No fallback — startup fails without a real one. Generate with `openssl rand -base64 48`. |
@@ -90,6 +90,17 @@ docker exec plaza-postgres createdb -U postgres plaza_backend_test
 ```
 
 Point `DATABASE_URL`/`TEST_DATABASE_URL` at whichever you chose.
+
+**Neon** (managed Postgres, used for shared/deployed environments): create a
+project at [neon.tech](https://neon.tech), copy its **pooled connection
+string** (already includes `?sslmode=require`) into `DATABASE_URL`. No
+`DIRECT_URL` is needed — this app uses `@prisma/adapter-pg` with a single
+connection string for both `prisma migrate` and runtime queries, and Neon's
+pooler supports both. Run migrations once against it (`npm run
+prisma:migrate:deploy`) and, if it's a fresh database, seed it (`npm run
+seed`) — an empty database is indistinguishable from a "broken" one from the
+UI (empty charts, empty lists), so confirm data exists before assuming
+anything else is wrong.
 
 ## Prisma
 
