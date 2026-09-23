@@ -7,11 +7,15 @@ export class ConstructionAnalyticsRowDto {
   @ApiProperty()
   blockName!: string;
 
-  @ApiProperty({ format: 'uuid' })
-  floorId!: string;
+  @ApiProperty({
+    format: 'uuid',
+    nullable: true,
+    description: 'null for material written off against the whole block.',
+  })
+  floorId!: string | null;
 
-  @ApiProperty()
-  floorLabel!: string;
+  @ApiProperty({ nullable: true })
+  floorLabel!: string | null;
 
   @ApiProperty({ format: 'uuid' })
   materialId!: string;

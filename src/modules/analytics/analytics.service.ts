@@ -292,11 +292,14 @@ export class AnalyticsService {
     // Snapshots live on the write-off rows themselves, but groupBy cannot
     // return them — one more query keyed by whichever (block, floor,
     // material) triples actually appeared, not a per-row lookup.
+    // No `floorId` narrowing here: a block-level write-off carries a NULL
+    // floor, and SQL's `IN` never matches NULL — including it would drop
+    // exactly the rows whose labels are being looked up. (block, material)
+    // is narrow enough, and `distinct` still keys on the full triple.
     const sample = await this.prisma.client.stockWriteOff.findMany({
       where: {
         projectId,
         blockId: { in: [...new Set(rows.map((r) => r.blockId))] },
-        floorId: { in: [...new Set(rows.map((r) => r.floorId))] },
         materialId: { in: [...new Set(rows.map((r) => r.materialId))] },
       },
       distinct: ['blockId', 'floorId', 'materialId'],
@@ -309,8 +312,11 @@ export class AnalyticsService {
         materialNameSnapshot: true,
       },
     });
-    const labelKey = (blockId: string, floorId: string, materialId: string) =>
-      `${blockId}:${floorId}:${materialId}`;
+    const labelKey = (
+      blockId: string,
+      floorId: string | null,
+      materialId: string,
+    ) => `${blockId}:${floorId ?? ''}:${materialId}`;
     const labels = new Map(
       sample.map((s) => [labelKey(s.blockId, s.floorId, s.materialId), s]),
     );
@@ -327,7 +333,7 @@ export class AnalyticsService {
           blockId: row.blockId,
           blockName: label?.blockNameSnapshot ?? '',
           floorId: row.floorId,
-          floorLabel: label?.floorLabelSnapshot ?? '',
+          floorLabel: label?.floorLabelSnapshot ?? null,
           materialId: row.materialId,
           materialName: label?.materialNameSnapshot ?? '',
           quantity: (row._sum.quantity ?? ZERO).toFixed(6),

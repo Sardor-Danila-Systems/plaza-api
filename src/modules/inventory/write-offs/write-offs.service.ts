@@ -153,15 +153,21 @@ export class WriteOffsService {
             message: 'Building block not found in this project',
           });
         }
-        // Composite FK shape: the floor must belong to THIS block.
-        const floor = await tx.floor.findFirst({
-          where: { id: dto.floorId, projectId, blockId: dto.blockId },
-        });
-        if (!floor || !floor.isActive) {
-          throw new NotFoundException({
-            code: 'NOT_FOUND',
-            message: 'Floor not found for this building block',
+        // Composite FK shape: the floor, when one is named at all, must
+        // belong to THIS block. Omitting it writes the material off against
+        // the block as a whole (see StockWriteOff.floorId).
+        let floor: { id: string; label: string } | null = null;
+        if (dto.floorId) {
+          const found = await tx.floor.findFirst({
+            where: { id: dto.floorId, projectId, blockId: dto.blockId },
           });
+          if (!found || !found.isActive) {
+            throw new NotFoundException({
+              code: 'NOT_FOUND',
+              message: 'Floor not found for this building block',
+            });
+          }
+          floor = found;
         }
 
         const quantity = new Prisma.Decimal(dto.quantity);
@@ -223,8 +229,8 @@ export class WriteOffsService {
             materialNameSnapshot: material.name,
             blockId: block.id,
             blockNameSnapshot: block.name,
-            floorId: floor.id,
-            floorLabelSnapshot: floor.label,
+            floorId: floor?.id ?? null,
+            floorLabelSnapshot: floor?.label ?? null,
             quantity,
             unitCostUzs: depleted.unitCostUzs,
             totalCostUzs: depleted.totalCostUzs,

@@ -52,6 +52,7 @@ cp .env.example .env
 | `DATABASE_URL`      | **yes**  | PostgreSQL connection string (`postgres://` or `postgresql://`).                        |
 | `TEST_DATABASE_URL` | no       | Separate database used only by `npm run test:e2e` — see "Tests" below.                  |
 | `CORS_ORIGIN`       | **yes, to use the frontend** | Comma-separated allowed origins, e.g. `http://localhost:3001` for local dev. Empty/unset disables CORS entirely — every browser request from the frontend is then silently rejected before it reaches any route. This is the single most common "works on my machine, not after a fresh clone" cause: `.env.example` ships a working local-dev value, but a `.env` copied from an older revision or edited by hand can lose it. |
+| `COOKIE_SAMESITE`   | no       | `lax` (default) \| `none`. Use `none` when the frontend is on a different registrable domain than this API — otherwise the browser never returns the refresh cookie and sessions end when the access token expires. `none` forces secure cookies (HTTPS both sides). See [DEPLOY.md](DEPLOY.md). |
 | `SWAGGER_ENABLED`   | no       | `true`/`false`. Defaults to enabled outside `production`.                               |
 | `LOG_LEVEL`         | no       | `error` \| `warn` \| `log` \| `debug` \| `verbose`. Defaults to `log`.                   |
 | `JWT_ACCESS_SECRET` | **yes**  | ≥32 random characters. No fallback — startup fails without a real one. Generate with `openssl rand -base64 48`. |

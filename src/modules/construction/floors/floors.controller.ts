@@ -11,6 +11,7 @@ import {
   ApiBearerAuth,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiConflictResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -20,6 +21,7 @@ import { ErrorResponseDto } from '../../../common/dto/error-response.dto.js';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator.js';
 import type { AuthenticatedUser } from '../../auth/types/authenticated-user.js';
 import { CreateFloorDto } from './dto/create-floor.dto.js';
+import { CreateFloorsBulkDto } from './dto/create-floors-bulk.dto.js';
 import { FloorResponseDto } from './dto/floor-response.dto.js';
 import { UpdateFloorDto } from './dto/update-floor.dto.js';
 import { FloorsService } from './floors.service.js';
@@ -82,6 +84,31 @@ export class FloorsController {
     @Body() dto: CreateFloorDto,
   ): Promise<FloorResponseDto> {
     return this.floorsService.create(user, projectId, blockId, dto);
+  }
+
+  @Post('bulk')
+  @ApiOperation({
+    summary: 'Add several floors to a building block at once',
+    description:
+      'PROJECT_MANAGER of this project only. All-or-nothing: one transaction covers every label in the payload.',
+  })
+  @ApiCreatedResponse({ type: [FloorResponseDto] })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({
+    description: 'BLOCK_PROJECT_MISMATCH',
+    type: ErrorResponseDto,
+  })
+  @ApiConflictResponse({
+    description: 'FLOOR_LABEL_TAKEN',
+    type: ErrorResponseDto,
+  })
+  createBulk(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('blockId', ParseUUIDPipe) blockId: string,
+    @Body() dto: CreateFloorsBulkDto,
+  ): Promise<FloorResponseDto[]> {
+    return this.floorsService.createBulk(user, projectId, blockId, dto);
   }
 
   @Patch(':floorId')

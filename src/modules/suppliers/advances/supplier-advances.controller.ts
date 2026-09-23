@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   Param,
   ParseUUIDPipe,
@@ -15,6 +16,7 @@ import {
   ApiForbiddenResponse,
   ApiHeader,
   ApiNotFoundResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
@@ -32,6 +34,21 @@ import { SupplierAdvancesService } from './supplier-advances.service.js';
 @Controller('projects/:projectId/suppliers/:supplierId/advances')
 export class SupplierAdvancesController {
   constructor(private readonly advancesService: SupplierAdvancesService) {}
+
+  @Get()
+  @ApiOperation({
+    summary: 'List a supplier’s advances with their remaining balances',
+  })
+  @ApiOkResponse({ type: [SupplierAdvanceResponseDto] })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  list(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('supplierId', ParseUUIDPipe) supplierId: string,
+  ): Promise<SupplierAdvanceResponseDto[]> {
+    return this.advancesService.list(user, projectId, supplierId);
+  }
 
   @Post()
   @HttpCode(201)

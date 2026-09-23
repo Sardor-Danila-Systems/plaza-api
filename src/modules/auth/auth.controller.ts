@@ -222,7 +222,7 @@ export class AuthController {
     const cookieOptions = {
       httpOnly: true,
       secure: this.config.useSecureCookies,
-      sameSite: 'lax' as const,
+      sameSite: this.config.cookieSameSite,
       path: AUTH_COOKIE_PATH,
       maxAge: this.config.refreshTokenTtlMs,
     };

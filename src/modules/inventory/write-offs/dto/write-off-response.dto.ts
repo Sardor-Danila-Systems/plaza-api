@@ -25,11 +25,15 @@ export class WriteOffResponseDto {
   @ApiProperty()
   blockNameSnapshot!: string;
 
-  @ApiProperty({ format: 'uuid' })
-  floorId!: string;
+  @ApiProperty({
+    format: 'uuid',
+    nullable: true,
+    description: 'null when the write-off targets the whole block.',
+  })
+  floorId!: string | null;
 
-  @ApiProperty()
-  floorLabelSnapshot!: string;
+  @ApiProperty({ nullable: true })
+  floorLabelSnapshot!: string | null;
 
   @ApiProperty({ example: '25.500000' })
   quantity!: string;

@@ -61,10 +61,15 @@ Construction:
 - `GET /projects/:projectId/construction/blocks`
 - `GET /projects/:projectId/construction/blocks/:blockId`
 - `POST /projects/:projectId/construction/blocks`
+- `POST /projects/:projectId/construction/blocks/bulk` — several blocks, each
+  with its floors, in one transaction
 - `PATCH /projects/:projectId/construction/blocks/:blockId`
 - `GET /projects/:projectId/construction/blocks/:blockId/floors`
 - `GET /projects/:projectId/construction/blocks/:blockId/floors/:floorId`
 - `POST /projects/:projectId/construction/blocks/:blockId/floors`
+- `POST /projects/:projectId/construction/blocks/:blockId/floors/bulk` —
+  several floors at once; `sortOrder` continues after the block's current
+  highest unless `startSortOrder` is given
 - `PATCH /projects/:projectId/construction/blocks/:blockId/floors/:floorId`
 
 Finances:
@@ -113,6 +118,8 @@ Suppliers:
 
 Advances:
 
+- `GET /projects/:projectId/suppliers/:supplierId/advances` — every advance
+  with its remaining `availableAmount`
 - `POST /projects/:projectId/suppliers/:supplierId/advances` with `Idempotency-Key`
 
 Debt payments:
@@ -182,6 +189,10 @@ Create write-off:
   "comment": "Used on slab"
 }
 ```
+
+`floorId` is optional: omit it for material consumed by the block as a whole
+(site-wide pours, façade, roofing). The response then carries `floorId` and
+`floorLabelSnapshot` as `null`, and so does the construction-analytics row.
 
 Create transfer:
 

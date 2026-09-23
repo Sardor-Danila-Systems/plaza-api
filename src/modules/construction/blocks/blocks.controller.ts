@@ -11,6 +11,7 @@ import {
   ApiBearerAuth,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiConflictResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -22,6 +23,10 @@ import type { AuthenticatedUser } from '../../auth/types/authenticated-user.js';
 import { BlocksService } from './blocks.service.js';
 import { BuildingBlockResponseDto } from './dto/building-block-response.dto.js';
 import { CreateBuildingBlockDto } from './dto/create-building-block.dto.js';
+import {
+  BulkBuildingBlocksResponseDto,
+  CreateBuildingBlocksBulkDto,
+} from './dto/create-building-blocks-bulk.dto.js';
 import { UpdateBuildingBlockDto } from './dto/update-building-block.dto.js';
 
 @ApiTags('construction')
@@ -73,6 +78,29 @@ export class BlocksController {
     @Body() dto: CreateBuildingBlockDto,
   ): Promise<BuildingBlockResponseDto> {
     return this.blocksService.create(user, projectId, dto);
+  }
+
+  @Post('bulk')
+  @ApiOperation({
+    summary: 'Create several building blocks, each with its floors, at once',
+    description:
+      'PROJECT_MANAGER of this project only. All-or-nothing: one transaction covers every block and floor in the payload.',
+  })
+  @ApiCreatedResponse({ type: BulkBuildingBlocksResponseDto })
+  @ApiForbiddenResponse({
+    description: 'Not this project’s manager',
+    type: ErrorResponseDto,
+  })
+  @ApiConflictResponse({
+    description: 'BLOCK_CODE_TAKEN',
+    type: ErrorResponseDto,
+  })
+  createBulk(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Body() dto: CreateBuildingBlocksBulkDto,
+  ): Promise<BulkBuildingBlocksResponseDto> {
+    return this.blocksService.createBulk(user, projectId, dto);
   }
 
   @Patch(':blockId')

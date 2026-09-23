@@ -244,6 +244,45 @@ describe('Phase 8 inventory operations (e2e)', () => {
     }
   });
 
+  it('writes material off against a whole block when no floor is named', async () => {
+    const domain = await setupDomain();
+    try {
+      await receive(domain, domain.source.id, '10.000000', '100.00000000');
+      const { floorId: _omitted, ...blockLevel } = writeOffBody(domain);
+      const created = await request(app.getHttpServer())
+        .post(`/projects/${domain.project.id}/inventory/write-offs`)
+        .set('Authorization', `Bearer ${domain.token}`)
+        .set('Idempotency-Key', idem())
+        .send(blockLevel)
+        .expect(201);
+
+      expect(created.body.blockId).toBe(domain.block.id);
+      expect(created.body.floorId).toBeNull();
+      expect(created.body.floorLabelSnapshot).toBeNull();
+      expect(created.body.blockNameSnapshot).toBe('Block A');
+
+      // Costed and posted exactly like a floor-level write-off.
+      const balance = await prisma.client.inventoryBalance.findFirstOrThrow({
+        where: {
+          warehouseId: domain.source.id,
+          materialId: domain.material.id,
+        },
+      });
+      expect(balance.quantity.toFixed(6)).toBe('8.000000');
+
+      // A block that isn't in this project is still rejected even with no
+      // floor to validate it through.
+      await request(app.getHttpServer())
+        .post(`/projects/${domain.project.id}/inventory/write-offs`)
+        .set('Authorization', `Bearer ${domain.token}`)
+        .set('Idempotency-Key', idem())
+        .send({ ...blockLevel, blockId: randomUUID() })
+        .expect(404);
+    } finally {
+      await deleteTestProject(prisma.client, domain.project.id);
+    }
+  });
+
   it('keeps the historical write-off cost after a future purchase changes the average', async () => {
     const domain = await setupDomain();
     try {

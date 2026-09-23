@@ -1,11 +1,20 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../../database/prisma.service.js';
-import { BuildingBlock } from '../../../generated/prisma/client.js';
+import { BuildingBlock, Prisma } from '../../../generated/prisma/client.js';
 import { AuthenticatedUser } from '../../auth/types/authenticated-user.js';
 import { ProjectAccessAction } from '../../projects/project-access-action.enum.js';
 import { ProjectAccessService } from '../../projects/project-access.service.js';
 import { BuildingBlockResponseDto } from './dto/building-block-response.dto.js';
 import { CreateBuildingBlockDto } from './dto/create-building-block.dto.js';
+import {
+  BulkBuildingBlocksResponseDto,
+  CreateBuildingBlocksBulkDto,
+} from './dto/create-building-blocks-bulk.dto.js';
 import { UpdateBuildingBlockDto } from './dto/update-building-block.dto.js';
 
 @Injectable()
@@ -59,6 +68,74 @@ export class BlocksService {
       data: { projectId, name: dto.name, code: dto.code },
     });
     return this.toResponse(block);
+  }
+
+  /**
+   * Whole-shape create: every block and all of its floors in one
+   * transaction, so a partially-described building never survives a failure
+   * halfway through. Codes are unique per project, and a clash — whether
+   * with an existing block or with another entry of this same payload — is
+   * reported as one conflict rather than leaving half the set created.
+   */
+  async createBulk(
+    user: AuthenticatedUser,
+    projectId: string,
+    dto: CreateBuildingBlocksBulkDto,
+  ): Promise<BulkBuildingBlocksResponseDto> {
+    await this.projectAccess.assertAccess(
+      user,
+      projectId,
+      ProjectAccessAction.WRITE,
+    );
+
+    const codes = dto.blocks.map((b) => b.code);
+    const duplicate = codes.find((code, i) => codes.indexOf(code) !== i);
+    if (duplicate) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: `Duplicate block code in request: ${duplicate}`,
+      });
+    }
+
+    try {
+      const { blocks, floorsCreated } = await this.prisma.client.$transaction(
+        async (tx) => {
+          const created: BuildingBlock[] = [];
+          let floors = 0;
+          for (const entry of dto.blocks) {
+            const block = await tx.buildingBlock.create({
+              data: { projectId, name: entry.name, code: entry.code },
+            });
+            created.push(block);
+            if (entry.floorLabels?.length) {
+              const result = await tx.floor.createMany({
+                data: entry.floorLabels.map((label, index) => ({
+                  projectId,
+                  blockId: block.id,
+                  label,
+                  sortOrder: index + 1,
+                })),
+              });
+              floors += result.count;
+            }
+          }
+          return { blocks: created, floorsCreated: floors };
+        },
+      );
+      return { blocks: blocks.map(this.toResponse), floorsCreated };
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new ConflictException({
+          code: 'BLOCK_CODE_TAKEN',
+          message:
+            'A block or floor with one of these codes/labels already exists in this project',
+        });
+      }
+      throw error;
+    }
   }
 
   async update(

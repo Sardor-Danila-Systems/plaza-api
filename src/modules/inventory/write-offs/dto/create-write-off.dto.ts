@@ -4,9 +4,11 @@ import { IsBusinessDate } from '../../../../common/validators/is-business-date.v
 import { IsDecimalString } from '../../../../common/validators/decimal-string.validator.js';
 
 /**
- * A construction-consumption write-off (docs/backend-architecture.md §2:
- * "Require both building block and floor, and validate their
- * relationship"). No currency/rate fields at all — a write-off creates no
+ * A construction-consumption write-off. The building block is always
+ * required and the floor, when given, is validated to belong to it
+ * (docs/backend-architecture.md §2). `floorId` may be omitted for material
+ * consumed by the block as a whole — see StockWriteOff.floorId in
+ * prisma/schema.prisma. No currency/rate fields at all — a write-off creates no
  * cash transaction (docs/backend-architecture.md §7); its cost is entirely
  * derived from the balance's own current weighted-average cost at write-off
  * time (transaction-design.md §6), never client-supplied.
@@ -24,9 +26,15 @@ export class CreateWriteOffDto {
   @IsUUID()
   blockId!: string;
 
-  @ApiProperty({ format: 'uuid' })
+  @ApiProperty({
+    format: 'uuid',
+    required: false,
+    description:
+      'Omit for material consumed by the whole block rather than one floor.',
+  })
+  @IsOptional()
   @IsUUID()
-  floorId!: string;
+  floorId?: string;
 
   @ApiProperty({ example: '25.500000' })
   @IsDecimalString({ maxDecimalPlaces: 6 })

@@ -34,6 +34,41 @@ export class SupplierAdvancesService {
   ) {}
 
   /**
+   * Every advance this supplier has, newest first, each with its own
+   * remaining `availableAmount`. Without this the only server-side
+   * enumeration of advances was the XLSX export, so a purchase form had no
+   * way to offer concrete advance ids to allocate against.
+   */
+  async list(
+    user: AuthenticatedUser,
+    projectId: string,
+    supplierId: string,
+  ): Promise<SupplierAdvanceResponseDto[]> {
+    await this.projectAccess.assertAccess(
+      user,
+      projectId,
+      ProjectAccessAction.READ,
+    );
+    const supplier = await this.prisma.client.supplier.findFirst({
+      where: { id: supplierId, projectId },
+    });
+    if (!supplier) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Supplier not found in this project',
+      });
+    }
+
+    const advances = await this.prisma.client.supplierAdvance.findMany({
+      where: { projectId, supplierId },
+      orderBy: { createdAt: 'desc' },
+    });
+    return Promise.all(
+      advances.map((advance) => this.toResponse(this.prisma.client, advance)),
+    );
+  }
+
+  /**
    * Funds a supplier advance — cash decreases, the advance's available
    * balance increases, atomically (this phase's §6.3/§6.13). Uses
    * `FinancialPostingService.postCashEffect` for the actual cash row so the

@@ -67,6 +67,21 @@ class EnvironmentVariables {
   @IsString()
   CORS_ORIGIN?: string;
 
+  /**
+   * `SameSite` for the refresh/CSRF cookies. `lax` (the default) is only
+   * sent on a cross-origin XHR when both origins share a registrable
+   * domain — `app.example.com` calling `api.example.com` is fine, but a
+   * frontend on one domain calling an API on another (e.g. Vercel ->
+   * Render) never receives the cookie back, so every session silently ends
+   * when the access token expires. `none` is the fix for that layout and
+   * requires secure cookies, i.e. HTTPS on both sides; CSRF protection does
+   * not depend on this setting (a double-submit token cookie + header is
+   * enforced independently).
+   */
+  @IsOptional()
+  @IsEnum(['lax', 'none'] as const)
+  COOKIE_SAMESITE?: 'lax' | 'none';
+
   @IsOptional()
   @IsEnum(['true', 'false'] as const)
   SWAGGER_ENABLED?: 'true' | 'false';

@@ -43,6 +43,103 @@ describe('Construction blocks (e2e)', () => {
     return { project, manager, token };
   }
 
+  describe('POST /projects/:projectId/construction/blocks/bulk', () => {
+    it('creates every block with all of its floors in one call', async () => {
+      const { project, manager, token } = await setupProjectWithManager();
+      try {
+        const response = await request(app.getHttpServer())
+          .post(`/projects/${project.id}/construction/blocks/bulk`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({
+            blocks: [
+              { name: 'Блок А', code: 'blok-a', floorLabels: ['Этаж 1', 'Этаж 2'] },
+              { name: 'Блок Б', code: 'blok-b', floorLabels: ['Этаж 1'] },
+              { name: 'Блок В', code: 'blok-v' },
+            ],
+          })
+          .expect(201);
+
+        expect(response.body.blocks).toHaveLength(3);
+        expect(response.body.floorsCreated).toBe(3);
+
+        const floors = await prisma.client.floor.findMany({
+          where: { projectId: project.id },
+          orderBy: [{ blockId: 'asc' }, { sortOrder: 'asc' }],
+        });
+        expect(floors).toHaveLength(3);
+        // Label order in the payload becomes sortOrder, 1-based.
+        expect(floors.map((f) => f.sortOrder).sort()).toEqual([1, 1, 2]);
+      } finally {
+        await deleteTestUser(prisma.client, manager.id);
+        await deleteTestProject(prisma.client, project.id);
+      }
+    });
+
+    it('creates nothing at all when one code collides', async () => {
+      const { project, manager, token } = await setupProjectWithManager();
+      try {
+        await createTestBlock(prisma.client, project.id, { code: 'blok-a' });
+
+        const response = await request(app.getHttpServer())
+          .post(`/projects/${project.id}/construction/blocks/bulk`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({
+            blocks: [
+              { name: 'Блок Б', code: 'blok-b', floorLabels: ['Этаж 1'] },
+              { name: 'Блок А', code: 'blok-a' },
+            ],
+          })
+          .expect(409);
+        expect(response.body.code).toBe('BLOCK_CODE_TAKEN');
+
+        // The first block of the payload must not have survived.
+        const blocks = await prisma.client.buildingBlock.findMany({
+          where: { projectId: project.id },
+        });
+        expect(blocks.map((b) => b.code)).toEqual(['blok-a']);
+      } finally {
+        await deleteTestUser(prisma.client, manager.id);
+        await deleteTestProject(prisma.client, project.id);
+      }
+    });
+
+    it('rejects a payload that repeats a code', async () => {
+      const { project, manager, token } = await setupProjectWithManager();
+      try {
+        const response = await request(app.getHttpServer())
+          .post(`/projects/${project.id}/construction/blocks/bulk`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({
+            blocks: [
+              { name: 'Блок А', code: 'blok-a' },
+              { name: 'Блок А снова', code: 'blok-a' },
+            ],
+          })
+          .expect(400);
+        expect(response.body.code).toBe('VALIDATION_ERROR');
+      } finally {
+        await deleteTestUser(prisma.client, manager.id);
+        await deleteTestProject(prisma.client, project.id);
+      }
+    });
+
+    it('OWNER cannot bulk-create blocks', async () => {
+      const project = await createTestProject(prisma.client);
+      const owner = await createTestUser(prisma.client, { role: Role.OWNER });
+      try {
+        const token = await loginTestUser(app.getHttpServer(), owner.email);
+        await request(app.getHttpServer())
+          .post(`/projects/${project.id}/construction/blocks/bulk`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ blocks: [{ name: 'Блок А', code: 'blok-a' }] })
+          .expect(403);
+      } finally {
+        await deleteTestUser(prisma.client, owner.id);
+        await deleteTestProject(prisma.client, project.id);
+      }
+    });
+  });
+
   describe('POST /projects/:projectId/construction/blocks', () => {
     it('PROJECT_MANAGER creates a block in their own project', async () => {
       const { project, manager, token } = await setupProjectWithManager();

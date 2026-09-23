@@ -607,7 +607,9 @@ export class ReportsService {
       return page.map((row): CellValue[] => [
         dateCell(row.occurredAt),
         row.blockNameSnapshot,
-        row.floorLabelSnapshot,
+        // A block-level write-off has no floor at all — an explicit marker
+        // reads better in a spreadsheet than an empty cell.
+        row.floorLabelSnapshot ?? 'WHOLE BLOCK',
         row.warehouseNameSnapshot,
         row.materialNameSnapshot,
         row.quantity.toFixed(6),

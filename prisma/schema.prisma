@@ -200,7 +200,8 @@ model BuildingBlock {
   createdAt DateTime @default(now()) @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
-  floors Floor[]
+  floors         Floor[]
+  stockWriteOffs StockWriteOff[]
 
   @@unique([projectId, code])
   @@unique([projectId, id])
@@ -869,11 +870,22 @@ model StockWriteOff {
   /// Composite FK proves the floor belongs to the named block, the same
   /// `(projectId, blockId, floorId)` pattern Phase 3's construction module
   /// already established for `Floor` itself.
-  blockId            String @db.Uuid
-  floorId            String @db.Uuid
-  floor              Floor  @relation(fields: [projectId, blockId, floorId], references: [projectId, blockId, id], onDelete: Restrict, onUpdate: Restrict)
+  ///
+  /// `floorId` is nullable: material is often consumed by a block as a
+  /// whole (site-wide concrete pours, façade work) rather than by one
+  /// level, and forcing an arbitrary floor there only falsifies the
+  /// per-floor analytics. A NULL floor means exactly "this block, no
+  /// single floor" — never "unknown". The composite FK is MATCH SIMPLE, so
+  /// it is simply not enforced while `floorId` is NULL; the separate
+  /// `(projectId, blockId)` FK below keeps the block itself verified in
+  /// both cases. A hand-written CHECK keeps `floorId` and
+  /// `floorLabelSnapshot` null/non-null together (ADR 0008).
+  blockId            String        @db.Uuid
+  block              BuildingBlock @relation(fields: [projectId, blockId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  floorId            String?       @db.Uuid
+  floor              Floor?        @relation(fields: [projectId, blockId, floorId], references: [projectId, blockId, id], onDelete: Restrict, onUpdate: Restrict)
   blockNameSnapshot  String
-  floorLabelSnapshot String
+  floorLabelSnapshot String?
 
   /// Valued at the CURRENT weighted-average cost at write-off time
   /// (transaction-design.md §6) — fixed forever afterward, even if a later

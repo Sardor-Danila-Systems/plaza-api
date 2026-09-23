@@ -82,7 +82,14 @@ export class AppConfigService {
 
   /** `secure` cookie flag: required in production (HTTPS), relaxed for local HTTP dev. */
   get useSecureCookies(): boolean {
-    return this.isProduction;
+    // SameSite=None is only honored on a secure cookie, so asking for it
+    // implies HTTPS even outside production.
+    return this.isProduction || this.cookieSameSite === 'none';
+  }
+
+  /** See COOKIE_SAMESITE in src/config/env.validation.ts. */
+  get cookieSameSite(): 'lax' | 'none' {
+    return this.configService.get('COOKIE_SAMESITE', { infer: true }) ?? 'lax';
   }
 
   // --- Phase 9: attachment storage ---
