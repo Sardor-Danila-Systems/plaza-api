@@ -226,6 +226,164 @@ describe('Analytics (e2e)', () => {
     }
   });
 
+  describe('Construction analytics — wholeBlockOnly filter', () => {
+    it('distinguishes floor-specific rows from whole-block rows (floorId IS NULL), and rejects combining floorId with wholeBlockOnly', async () => {
+      const { project, token } = await setupProjectAndManager();
+      try {
+        const category = await createTestMaterialCategory(
+          prisma.client,
+          project.id,
+        );
+        const unit = await createTestUnit(prisma.client, project.id);
+        const warehouse = await createTestWarehouse(prisma.client, project.id);
+        const material = await createTestMaterial(
+          prisma.client,
+          project.id,
+          category.id,
+          unit.id,
+        );
+        const block = await createTestBlock(prisma.client, project.id);
+        const floorA = await createTestFloor(
+          prisma.client,
+          project.id,
+          block.id,
+          {
+            label: 'Floor A',
+            sortOrder: 1,
+          },
+        );
+        const floorB = await createTestFloor(
+          prisma.client,
+          project.id,
+          block.id,
+          {
+            label: 'Floor B',
+            sortOrder: 2,
+          },
+        );
+
+        // Seed enough stock to write off from.
+        await request(app.getHttpServer())
+          .post(`/projects/${project.id}/purchases`)
+          .set('Authorization', `Bearer ${token}`)
+          .set('Idempotency-Key', idem())
+          .send({
+            supplierId: (await createTestSupplier(prisma.client, project.id))
+              .id,
+            warehouseId: warehouse.id,
+            currency: 'UZS',
+            items: [
+              {
+                materialId: material.id,
+                quantity: '100.000000',
+                unitPrice: '1000.00000000',
+              },
+            ],
+            cashPaid: '0.00',
+            occurredAt: '2026-09-01',
+          })
+          .expect(201);
+
+        // Floor A: 10 units. Floor B: 20 units. Whole block (no floor): 5 units.
+        await request(app.getHttpServer())
+          .post(`/projects/${project.id}/inventory/write-offs`)
+          .set('Authorization', `Bearer ${token}`)
+          .set('Idempotency-Key', idem())
+          .send({
+            warehouseId: warehouse.id,
+            materialId: material.id,
+            blockId: block.id,
+            floorId: floorA.id,
+            quantity: '10.000000',
+            occurredAt: '2026-09-05',
+          })
+          .expect(201);
+        await request(app.getHttpServer())
+          .post(`/projects/${project.id}/inventory/write-offs`)
+          .set('Authorization', `Bearer ${token}`)
+          .set('Idempotency-Key', idem())
+          .send({
+            warehouseId: warehouse.id,
+            materialId: material.id,
+            blockId: block.id,
+            floorId: floorB.id,
+            quantity: '20.000000',
+            occurredAt: '2026-09-06',
+          })
+          .expect(201);
+        await request(app.getHttpServer())
+          .post(`/projects/${project.id}/inventory/write-offs`)
+          .set('Authorization', `Bearer ${token}`)
+          .set('Idempotency-Key', idem())
+          .send({
+            warehouseId: warehouse.id,
+            materialId: material.id,
+            blockId: block.id,
+            // floorId omitted entirely — whole-block write-off.
+            quantity: '5.000000',
+            occurredAt: '2026-09-07',
+          })
+          .expect(201);
+
+        const query = { dateFrom: '2026-09-01', dateTo: '2026-10-01' };
+
+        // No floor filter at all: all three rows (two floor-specific + one
+        // whole-block) — current behavior, unchanged.
+        const unfiltered = await request(app.getHttpServer())
+          .get(`/projects/${project.id}/analytics/construction`)
+          .query(query)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(200);
+        expect(unfiltered.body.rows).toHaveLength(3);
+        const totalQuantity = unfiltered.body.rows.reduce(
+          (sum: number, r: { quantity: string }) => sum + Number(r.quantity),
+          0,
+        );
+        expect(totalQuantity).toBe(35); // 10 + 20 + 5
+
+        // An exact floorId still means "only that floor" — unaffected by
+        // the new parameter.
+        const exactFloor = await request(app.getHttpServer())
+          .get(`/projects/${project.id}/analytics/construction`)
+          .query({ ...query, floorId: floorA.id })
+          .set('Authorization', `Bearer ${token}`)
+          .expect(200);
+        expect(exactFloor.body.rows).toHaveLength(1);
+        expect(exactFloor.body.rows[0]).toMatchObject({
+          floorId: floorA.id,
+          quantity: '10.000000',
+        });
+
+        // wholeBlockOnly=true: exactly the floorId=null row, none of the
+        // floor-specific ones — the new explicit semantic this test exists
+        // to prove, never a magic-UUID sentinel.
+        const wholeBlockOnly = await request(app.getHttpServer())
+          .get(`/projects/${project.id}/analytics/construction`)
+          .query({ ...query, blockId: block.id, wholeBlockOnly: 'true' })
+          .set('Authorization', `Bearer ${token}`)
+          .expect(200);
+        expect(wholeBlockOnly.body.rows).toHaveLength(1);
+        expect(wholeBlockOnly.body.rows[0]).toMatchObject({
+          blockId: block.id,
+          floorId: null,
+          floorLabel: null,
+          quantity: '5.000000',
+          valueUzs: '5000.00000000',
+        });
+
+        // Combining floorId with wholeBlockOnly is an unambiguous
+        // contradiction — a write-off row has exactly one of the two.
+        await request(app.getHttpServer())
+          .get(`/projects/${project.id}/analytics/construction`)
+          .query({ ...query, floorId: floorA.id, wholeBlockOnly: 'true' })
+          .set('Authorization', `Bearer ${token}`)
+          .expect(400);
+      } finally {
+        await deleteTestProject(prisma.client, project.id);
+      }
+    });
+  });
+
   describe('Authorization and isolation', () => {
     it('OWNER/ACCOUNTANT can read any active project; a manager of a different project cannot', async () => {
       const { project } = await setupProjectAndManager();

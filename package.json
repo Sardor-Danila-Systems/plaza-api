@@ -28,7 +28,8 @@
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "seed": "tsx prisma/seed.ts",
-    "provision": "node dist/cli/provision.js"
+    "provision": "node dist/cli/provision.js",
+    "create-user": "node dist/cli/provision.js create-user"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1131.0",

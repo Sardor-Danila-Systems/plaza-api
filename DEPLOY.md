@@ -135,29 +135,42 @@ ALTER TABLE "StockWriteOff" ALTER COLUMN "floorLabelSnapshot" SET NOT NULL;
 
 ## 5. Проекты и пользователи
 
-Самостоятельной регистрации нет и эндпоинта создания проекта нет тоже
-(ADR 0014). Проекты и роли заводятся CLI, который **обязан** работать из
-собранного `dist/` (ADR 0015):
+Самостоятельной регистрации нет и эндпоинта создания проекта или
+пользователя нет тоже (ADR 0014). Всё заводится через один и тот же
+операторский CLI, который **обязан** работать из собранного `dist/`
+(ADR 0015) — и, в отличие от `prisma/seed.ts`, прекрасно работает при
+`NODE_ENV=production`, это и есть его назначение:
 
 ```bash
 npm run build
+
+# Проект и первые учётные записи:
 npm run provision -- create-project --name "Euro Plaza" --code euro-plaza
-npm run provision -- assign-manager --project euro-plaza --user manager@example.com
-npm run provision -- set-role --user owner@example.com --role OWNER
+
+CREATE_USER_PASSWORD='длинная случайная фраза' \
+  npm run provision -- create-user \
+  --role OWNER --email owner@example.com --name "Имя Фамилия"
+
+CREATE_USER_PASSWORD='другая случайная фраза' \
+  npm run provision -- create-user \
+  --role PROJECT_MANAGER --email manager@example.com --name "Имя Фамилия" \
+  --project euro-plaza
+
+# Изменить роль/проект уже существующего пользователя — set-role/assign-manager:
+npm run provision -- set-role --user someone@example.com --role ACCOUNTANT
+
+# Полная справка:
+npm run provision -- --help
 ```
 
-CLI назначает роли существующим пользователям, но **не создаёт их**.
-Создание учётных записей сейчас умеет только `prisma/seed.ts`, а он
-отказывается работать при `NODE_ENV=production`. Практический порядок для
-продакшена:
-
-1. Создать пользователей один раз, запустив сид с прод-`DATABASE_URL` и
-   `NODE_ENV=development`, обязательно задав реальные пароли:
-   `SEED_OWNER_PASSWORD=... SEED_MANAGER_PASSWORD=... SEED_ACCOUNTANT_PASSWORD=... npm run seed`
-   — сид также создаст три демо-проекта («Avenue Plaza» и др.), их потом
-   видно в списке проектов у OWNER.
-2. Либо — чище — завести пользователей SQL-вставкой с argon2-хэшем пароля,
-   а проекты создать через `provision`.
+`create-user` — единственный production-safe способ создать первую
+учётную запись (`prisma/seed.ts` отказывается работать при
+`NODE_ENV=production`, и это осталось так же). Пароль читается **только**
+из переменной окружения `CREATE_USER_PASSWORD` — никогда не передаётся
+флагом, чтобы не остаться в истории shell — и нигде не логируется. Минимум
+12 символов. Для `PROJECT_MANAGER` обязателен `--project`; назначение
+вытесняет текущего активного менеджера этого проекта, как и
+`assign-manager`.
 
 Пароли пользователь меняет сам в разделе «Профиль».
 

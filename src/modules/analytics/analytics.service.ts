@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaTx } from '../../database/project-lock.service.js';
 import { PrismaService } from '../../database/prisma.service.js';
 import {
@@ -259,6 +259,13 @@ export class AnalyticsService {
       projectId,
       ProjectAccessAction.READ,
     );
+
+    if (query.floorId && query.wholeBlockOnly) {
+      throw new BadRequestException(
+        'floorId and wholeBlockOnly are mutually exclusive — a write-off row has exactly one of a specific floor or no floor (whole-block) at a time.',
+      );
+    }
+
     const from = toDate(query.dateFrom);
     const to = toDate(query.dateTo);
     const occurredAt = windowFilter(from, to);
@@ -268,13 +275,25 @@ export class AnalyticsService {
     // time reconstruction (see this phase's report): a write-off cancelled
     // at any time is excluded entirely, rather than checked against
     // whether ITS OWN cancellation happened before or after `to`.
+    //
+    // Floor filtering has three distinct states, not two: omitted (both
+    // floor-specific and whole-block rows), an exact floorId (that floor
+    // only), or wholeBlockOnly (floorId IS NULL — explicit, never a magic
+    // UUID sentinel smuggled through `floorId`). `floorId: null` in Prisma
+    // compiles to `IS NULL`, correctly distinct from the key being absent.
+    const floorFilter = query.floorId
+      ? { floorId: query.floorId }
+      : query.wholeBlockOnly
+        ? { floorId: null }
+        : {};
+
     const rows = await this.prisma.client.stockWriteOff.groupBy({
       by: ['blockId', 'floorId', 'materialId'],
       where: {
         projectId,
         cancelledAt: null,
         ...(query.blockId ? { blockId: query.blockId } : {}),
-        ...(query.floorId ? { floorId: query.floorId } : {}),
+        ...floorFilter,
         ...(occurredAt ? { occurredAt } : {}),
       },
       _sum: { quantity: true, totalCostUzs: true },

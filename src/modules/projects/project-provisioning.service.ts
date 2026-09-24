@@ -1,10 +1,16 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
 import { PrismaService } from '../../database/prisma.service.js';
-import { Project, Role } from '../../generated/prisma/client.js';
+import { normalizeEmail } from '../auth/email-normalization.js';
+import { PasswordService } from '../auth/password.service.js';
+import { CreateUserDto } from './dto/create-user.dto.js';
+import { Prisma, Project, Role, User } from '../../generated/prisma/client.js';
 
 /**
  * Project creation and manager assignment/role changes — invoked only by
@@ -14,7 +20,10 @@ import { Project, Role } from '../../generated/prisma/client.js';
  */
 @Injectable()
 export class ProjectProvisioningService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly passwordService: PasswordService,
+  ) {}
 
   async createProject(input: {
     name: string;
@@ -135,5 +144,102 @@ export class ProjectProvisioningService {
       where: { id: userId },
       data: { role, projectId: null },
     });
+  }
+
+  /**
+   * Creates a new user account — the production-safe replacement for
+   * `prisma/seed.ts` (which refuses `NODE_ENV=production`) and the only way
+   * to provision the very first accounts, since there is no self-registration
+   * endpoint (ADR 0014/0015 apply here too: only `src/cli/provision.ts`
+   * calls this, never a controller). Accepts exactly the fields a CLI
+   * operator can pass — `email`, `displayName`, `password`, `role`, and
+   * `projectId` — nothing else about the row (isActive, timestamps, id) is
+   * caller-controlled.
+   *
+   * Input is validated with the same standalone class-validator pattern
+   * `env.validation.ts` uses (see CreateUserDto). Never returns or logs
+   * `passwordHash`.
+   */
+  async createUser(input: {
+    email: string;
+    displayName: string;
+    password: string;
+    role: Role;
+    projectId?: string;
+  }): Promise<Omit<User, 'passwordHash'>> {
+    const dto = plainToInstance(CreateUserDto, input);
+    const errors = validateSync(dto, { skipMissingProperties: false });
+    if (errors.length > 0) {
+      const details = errors
+        .map((error) => Object.values(error.constraints ?? {}).join('; '))
+        .join('\n');
+      throw new BadRequestException(`Invalid user input:\n${details}`);
+    }
+
+    if (dto.role === Role.PROJECT_MANAGER) {
+      if (!dto.projectId) {
+        throw new BadRequestException(
+          'projectId is required when role is PROJECT_MANAGER',
+        );
+      }
+    } else if (dto.projectId) {
+      throw new BadRequestException(
+        `projectId must not be supplied when role is ${dto.role}`,
+      );
+    }
+
+    const email = normalizeEmail(dto.email);
+    const passwordHash = await this.passwordService.hash(dto.password);
+
+    let user: User;
+    try {
+      user = await this.prisma.client.$transaction(async (tx) => {
+        if (dto.role === Role.PROJECT_MANAGER) {
+          const project = await tx.project.findUnique({
+            where: { id: dto.projectId },
+          });
+          if (!project) {
+            throw new NotFoundException(`Project ${dto.projectId} not found`);
+          }
+          // Same invariant-preserving statement order as assignManager
+          // (see its doc comment): deactivate any existing active manager
+          // of this project BEFORE creating the new active manager row —
+          // the partial unique index (User_one_active_manager_per_project)
+          // is not deferrable.
+          await tx.user.updateMany({
+            where: {
+              projectId: dto.projectId,
+              role: Role.PROJECT_MANAGER,
+              isActive: true,
+            },
+            data: { isActive: false },
+          });
+        }
+
+        return tx.user.create({
+          data: {
+            email,
+            displayName: dto.displayName,
+            role: dto.role,
+            passwordHash,
+            projectId:
+              dto.role === Role.PROJECT_MANAGER ? dto.projectId! : null,
+          },
+        });
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new ConflictException(
+          `A user with email "${email}" already exists`,
+        );
+      }
+      throw error;
+    }
+
+    const { passwordHash: _passwordHash, ...safeUser } = user;
+    return safeUser;
   }
 }

@@ -25,6 +25,10 @@ import { TokenService } from './token.service.js';
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
   ],
-  exports: [TokenService],
+  // PasswordService: also reused by ProjectProvisioningService's
+  // createUser (src/cli/provision.ts's `create-user` command) — the only
+  // production-safe way to create an account (seed.ts refuses
+  // NODE_ENV=production; there is no HTTP registration endpoint).
+  exports: [TokenService, PasswordService],
 })
 export class AuthModule {}

@@ -1,10 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigModule } from '../src/config/config.module.js';
 import { PrismaModule } from '../src/database/prisma.module.js';
 import { PrismaService } from '../src/database/prisma.service.js';
 import { Role } from '../src/generated/prisma/client.js';
+import { PasswordService } from '../src/modules/auth/password.service.js';
 import { ProjectProvisioningService } from '../src/modules/projects/project-provisioning.service.js';
 import {
   createTestProject,
@@ -26,7 +31,7 @@ describe('ProjectProvisioningService (e2e)', () => {
   beforeAll(async () => {
     moduleRef = await Test.createTestingModule({
       imports: [ConfigModule, PrismaModule],
-      providers: [ProjectProvisioningService],
+      providers: [ProjectProvisioningService, PasswordService],
     }).compile();
 
     prisma = moduleRef.get(PrismaService);
@@ -285,6 +290,226 @@ describe('ProjectProvisioningService (e2e)', () => {
       } finally {
         await deleteTestUser(prisma.client, user.id);
       }
+    });
+  });
+
+  describe('createUser', () => {
+    const VALID_PASSWORD = 'a-perfectly-fine-password-1234';
+    let passwordService: PasswordService;
+
+    beforeAll(() => {
+      passwordService = moduleRef.get(PasswordService);
+    });
+
+    it('creates an OWNER with no projectId and never returns passwordHash', async () => {
+      const email = `owner-${randomUUID()}@example.com`;
+      const user = await provisioning.createUser({
+        email,
+        displayName: 'New Owner',
+        password: VALID_PASSWORD,
+        role: Role.OWNER,
+      });
+      try {
+        expect(user.email).toBe(email);
+        expect(user.role).toBe(Role.OWNER);
+        expect(user.projectId).toBeNull();
+        expect(user.isActive).toBe(true);
+        expect(user).not.toHaveProperty('passwordHash');
+
+        const persisted = await prisma.client.user.findUniqueOrThrow({
+          where: { id: user.id },
+        });
+        const verified = await passwordService.verify(
+          persisted.passwordHash,
+          VALID_PASSWORD,
+        );
+        expect(verified).toBe(true);
+      } finally {
+        await deleteTestUser(prisma.client, user.id);
+      }
+    });
+
+    it('creates an ACCOUNTANT with no projectId', async () => {
+      const email = `accountant-${randomUUID()}@example.com`;
+      const user = await provisioning.createUser({
+        email,
+        displayName: 'New Accountant',
+        password: VALID_PASSWORD,
+        role: Role.ACCOUNTANT,
+      });
+      try {
+        expect(user.role).toBe(Role.ACCOUNTANT);
+        expect(user.projectId).toBeNull();
+      } finally {
+        await deleteTestUser(prisma.client, user.id);
+      }
+    });
+
+    it('normalizes email to lowercase/trimmed', async () => {
+      const suffix = randomUUID();
+      const user = await provisioning.createUser({
+        email: `  Mixed-Case-${suffix}@Example.com  `,
+        displayName: 'Case Test',
+        password: VALID_PASSWORD,
+        role: Role.OWNER,
+      });
+      try {
+        expect(user.email).toBe(`mixed-case-${suffix}@example.com`);
+      } finally {
+        await deleteTestUser(prisma.client, user.id);
+      }
+    });
+
+    it('creates a PROJECT_MANAGER with the given projectId, active', async () => {
+      const project = await createTestProject(prisma.client);
+      const user = await provisioning.createUser({
+        email: `pm-${randomUUID()}@example.com`,
+        displayName: 'New PM',
+        password: VALID_PASSWORD,
+        role: Role.PROJECT_MANAGER,
+        projectId: project.id,
+      });
+      try {
+        expect(user.role).toBe(Role.PROJECT_MANAGER);
+        expect(user.projectId).toBe(project.id);
+        expect(user.isActive).toBe(true);
+      } finally {
+        await deleteTestUser(prisma.client, user.id);
+        await deleteTestProject(prisma.client, project.id);
+      }
+    });
+
+    it("creating a PROJECT_MANAGER deactivates the project's existing active manager (same invariant as assignManager)", async () => {
+      const project = await createTestProject(prisma.client);
+      const existingManager = await createTestUser(prisma.client, {
+        role: Role.PROJECT_MANAGER,
+        projectId: project.id,
+      });
+      const newManager = await provisioning.createUser({
+        email: `pm2-${randomUUID()}@example.com`,
+        displayName: 'Replacement PM',
+        password: VALID_PASSWORD,
+        role: Role.PROJECT_MANAGER,
+        projectId: project.id,
+      });
+      try {
+        const outgoing = await prisma.client.user.findUniqueOrThrow({
+          where: { id: existingManager.id },
+        });
+        expect(outgoing.isActive).toBe(false);
+
+        const activeManagers = await prisma.client.user.findMany({
+          where: {
+            projectId: project.id,
+            role: Role.PROJECT_MANAGER,
+            isActive: true,
+          },
+        });
+        expect(activeManagers).toHaveLength(1);
+        expect(activeManagers[0].id).toBe(newManager.id);
+      } finally {
+        await deleteTestUser(prisma.client, existingManager.id);
+        await deleteTestUser(prisma.client, newManager.id);
+        await deleteTestProject(prisma.client, project.id);
+      }
+    });
+
+    it('rejects a duplicate email', async () => {
+      const email = `dup-${randomUUID()}@example.com`;
+      const first = await provisioning.createUser({
+        email,
+        displayName: 'First',
+        password: VALID_PASSWORD,
+        role: Role.OWNER,
+      });
+      try {
+        await expect(
+          provisioning.createUser({
+            email,
+            displayName: 'Second',
+            password: VALID_PASSWORD,
+            role: Role.ACCOUNTANT,
+          }),
+        ).rejects.toBeInstanceOf(ConflictException);
+      } finally {
+        await deleteTestUser(prisma.client, first.id);
+      }
+    });
+
+    it('rejects PROJECT_MANAGER without a projectId', async () => {
+      await expect(
+        provisioning.createUser({
+          email: `no-project-${randomUUID()}@example.com`,
+          displayName: 'X',
+          password: VALID_PASSWORD,
+          role: Role.PROJECT_MANAGER,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects a projectId supplied for a non-manager role', async () => {
+      const project = await createTestProject(prisma.client);
+      try {
+        await expect(
+          provisioning.createUser({
+            email: `extra-project-${randomUUID()}@example.com`,
+            displayName: 'X',
+            password: VALID_PASSWORD,
+            role: Role.OWNER,
+            projectId: project.id,
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      } finally {
+        await deleteTestProject(prisma.client, project.id);
+      }
+    });
+
+    it('rejects a nonexistent project for PROJECT_MANAGER', async () => {
+      await expect(
+        provisioning.createUser({
+          email: `ghost-project-${randomUUID()}@example.com`,
+          displayName: 'X',
+          password: VALID_PASSWORD,
+          role: Role.PROJECT_MANAGER,
+          projectId: randomUUID(),
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('rejects an invalid email', async () => {
+      await expect(
+        provisioning.createUser({
+          email: 'not-an-email',
+          displayName: 'X',
+          password: VALID_PASSWORD,
+          role: Role.OWNER,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects a password shorter than 12 characters', async () => {
+      await expect(
+        provisioning.createUser({
+          email: `short-pw-${randomUUID()}@example.com`,
+          displayName: 'X',
+          password: 'tooshort',
+          role: Role.OWNER,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('never leaves a partially-created user on rejection (no row persisted)', async () => {
+      const email = `rejected-${randomUUID()}@example.com`;
+      await expect(
+        provisioning.createUser({
+          email,
+          displayName: 'X',
+          password: VALID_PASSWORD,
+          role: Role.PROJECT_MANAGER, // no projectId -> rejected before any write
+        }),
+      ).rejects.toThrow();
+      const found = await prisma.client.user.findUnique({ where: { email } });
+      expect(found).toBeNull();
     });
   });
 
