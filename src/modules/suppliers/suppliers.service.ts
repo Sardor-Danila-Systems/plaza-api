@@ -1,11 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service.js';
-import { Supplier } from '../../generated/prisma/client.js';
+import { Prisma, Supplier } from '../../generated/prisma/client.js';
 import { AuditService } from '../audit/audit.service.js';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.js';
 import { ProjectAccessAction } from '../projects/project-access-action.enum.js';
 import { ProjectAccessService } from '../projects/project-access.service.js';
 import { CreateSupplierDto } from './dto/create-supplier.dto.js';
+import { ListSuppliersQueryDto } from './dto/list-suppliers-query.dto.js';
 import { SupplierResponseDto } from './dto/supplier-response.dto.js';
 import { UpdateSupplierDto } from './dto/update-supplier.dto.js';
 
@@ -23,14 +24,33 @@ export class SuppliersService {
   async list(
     user: AuthenticatedUser,
     projectId: string,
+    query: ListSuppliersQueryDto = {},
   ): Promise<SupplierResponseDto[]> {
     await this.projectAccess.assertAccess(
       user,
       projectId,
       ProjectAccessAction.READ,
     );
+
+    const where: Prisma.SupplierWhereInput = { projectId };
+    if (query.isActive !== undefined) {
+      where.isActive = query.isActive;
+    }
+    if (query.search) {
+      // Phone and taxpayer id are searched as plain substrings: whoever is
+      // holding the invoice reads the digits off it, and asking them to
+      // match the punctuation a phone number happens to be stored with
+      // would make the field useless.
+      where.OR = [
+        { name: { contains: query.search, mode: 'insensitive' } },
+        { contactPerson: { contains: query.search, mode: 'insensitive' } },
+        { phone: { contains: query.search } },
+        { taxId: { contains: query.search } },
+      ];
+    }
+
     const suppliers = await this.prisma.client.supplier.findMany({
-      where: { projectId },
+      where,
       orderBy: { name: 'asc' },
     });
     return suppliers.map(this.toResponse);
@@ -68,6 +88,7 @@ export class SuppliersService {
         name: dto.name,
         contactPerson: dto.contactPerson,
         phone: dto.phone,
+        taxId: dto.taxId,
         comment: dto.comment,
       },
     });
@@ -110,6 +131,7 @@ export class SuppliersService {
             ? { contactPerson: dto.contactPerson }
             : {}),
           ...(dto.phone !== undefined ? { phone: dto.phone } : {}),
+          ...(dto.taxId !== undefined ? { taxId: dto.taxId } : {}),
           ...(dto.comment !== undefined ? { comment: dto.comment } : {}),
           ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
         },
@@ -153,6 +175,7 @@ export class SuppliersService {
       name: supplier.name,
       contactPerson: supplier.contactPerson,
       phone: supplier.phone,
+      taxId: supplier.taxId,
       comment: supplier.comment,
       isActive: supplier.isActive,
       createdAt: supplier.createdAt,

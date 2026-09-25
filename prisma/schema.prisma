@@ -995,6 +995,13 @@ model Supplier {
   name          String
   contactPerson String?
   phone         String?
+  /// Uzbek taxpayer id (ИНН/СТИР) — nine digits, stored as text because it
+  /// is an identifier, not a number: leading zeros are significant and no
+  /// arithmetic is ever done with it. Deliberately NOT unique: the same
+  /// legal entity can legitimately appear twice while records are being
+  /// cleaned up, and a hard constraint would block entering a supplier
+  /// whose duplicate is already archived.
+  taxId         String?
   comment       String?
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now()) @db.Timestamptz(6)
@@ -1007,6 +1014,7 @@ model Supplier {
 
   @@unique([projectId, id])
   @@index([projectId, isActive, name])
+  @@index([projectId, taxId])
 }
 
 /// One posted invoice + simultaneous material receipt

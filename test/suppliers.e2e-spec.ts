@@ -125,6 +125,130 @@ describe('Suppliers, advances, and debt payments (e2e)', () => {
       }
     });
 
+    it('stores a nine-digit taxpayer id and rejects any other shape', async () => {
+      const { project, token } = await setupProjectAndManager();
+      try {
+        const created = await request(app.getHttpServer())
+          .post(`/projects/${project.id}/suppliers`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ name: 'ACME Supplies', taxId: '012345678' })
+          .expect(201);
+        // Leading zero survives — it is an identifier, not a number.
+        expect(created.body.taxId).toBe('012345678');
+
+        const read = await request(app.getHttpServer())
+          .get(`/projects/${project.id}/suppliers/${created.body.id}`)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(200);
+        expect(read.body.taxId).toBe('012345678');
+
+        const updated = await request(app.getHttpServer())
+          .patch(`/projects/${project.id}/suppliers/${created.body.id}`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ taxId: '987654321' })
+          .expect(200);
+        expect(updated.body.taxId).toBe('987654321');
+
+        for (const taxId of ['12345678', '1234567890', '12345678a', '']) {
+          await request(app.getHttpServer())
+            .post(`/projects/${project.id}/suppliers`)
+            .set('Authorization', `Bearer ${token}`)
+            .send({ name: 'Bad Tax Id', taxId })
+            .expect(400);
+        }
+
+        // Omitting it entirely stays valid — the field is optional.
+        const without = await request(app.getHttpServer())
+          .post(`/projects/${project.id}/suppliers`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ name: 'No Tax Id' })
+          .expect(201);
+        expect(without.body.taxId).toBeNull();
+      } finally {
+        await deleteTestProject(prisma.client, project.id);
+      }
+    });
+
+    it('searches suppliers by name, contact person, phone and taxpayer id', async () => {
+      const { project, token } = await setupProjectAndManager();
+      try {
+        const create = (body: Record<string, unknown>) =>
+          request(app.getHttpServer())
+            .post(`/projects/${project.id}/suppliers`)
+            .set('Authorization', `Bearer ${token}`)
+            .send(body)
+            .expect(201);
+
+        await create({
+          name: 'Бетон Завод',
+          contactPerson: 'Алишер',
+          phone: '+998901112233',
+          taxId: '123456789',
+        });
+        await create({
+          name: 'Кирпич Плюс',
+          contactPerson: 'Дилшод',
+          phone: '+998907778899',
+          taxId: '987654321',
+        });
+
+        const search = async (term: string) => {
+          const res = await request(app.getHttpServer())
+            .get(`/projects/${project.id}/suppliers`)
+            .query({ search: term })
+            .set('Authorization', `Bearer ${token}`)
+            .expect(200);
+          return (res.body as { name: string }[]).map((s) => s.name);
+        };
+
+        expect(await search('бетон')).toEqual(['Бетон Завод']);
+        expect(await search('Алишер')).toEqual(['Бетон Завод']);
+        expect(await search('7778899')).toEqual(['Кирпич Плюс']);
+        expect(await search('987654321')).toEqual(['Кирпич Плюс']);
+        expect(await search('нет такого')).toEqual([]);
+        // No search term still returns everything.
+        const all = await request(app.getHttpServer())
+          .get(`/projects/${project.id}/suppliers`)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(200);
+        expect(all.body).toHaveLength(2);
+      } finally {
+        await deleteTestProject(prisma.client, project.id);
+      }
+    });
+
+    it('filters suppliers by active state', async () => {
+      const { project, token } = await setupProjectAndManager();
+      try {
+        const kept = await request(app.getHttpServer())
+          .post(`/projects/${project.id}/suppliers`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ name: 'Активный' })
+          .expect(201);
+        const archived = await request(app.getHttpServer())
+          .post(`/projects/${project.id}/suppliers`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ name: 'Архивный' })
+          .expect(201);
+        await request(app.getHttpServer())
+          .patch(`/projects/${project.id}/suppliers/${archived.body.id}`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ isActive: false })
+          .expect(200);
+
+        const active = await request(app.getHttpServer())
+          .get(`/projects/${project.id}/suppliers`)
+          .query({ isActive: 'true' })
+          .set('Authorization', `Bearer ${token}`)
+          .expect(200);
+        expect((active.body as { id: string }[]).map((s) => s.id)).toEqual([
+          kept.body.id,
+        ]);
+      } finally {
+        await deleteTestProject(prisma.client, project.id);
+      }
+    });
+
     it("a manager of a different project cannot access this project's suppliers", async () => {
       const { project } = await setupProjectAndManager();
       const other = await setupProjectAndManager();

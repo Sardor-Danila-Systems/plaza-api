@@ -16,6 +16,9 @@ export class SupplierResponseDto {
   @ApiProperty({ nullable: true })
   phone!: string | null;
 
+  @ApiProperty({ nullable: true, example: '123456789' })
+  taxId!: string | null;
+
   @ApiProperty({ nullable: true })
   comment!: string | null;
 

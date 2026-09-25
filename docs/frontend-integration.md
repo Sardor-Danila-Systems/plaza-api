@@ -110,11 +110,17 @@ Inventory:
 
 Suppliers:
 
-- `GET /projects/:projectId/suppliers`
+- `GET /projects/:projectId/suppliers` — optional `search` (case-insensitive
+  substring over name, contact person, phone and `taxId`) and `isActive`
 - `GET /projects/:projectId/suppliers/:supplierId`
 - `POST /projects/:projectId/suppliers`
 - `PATCH /projects/:projectId/suppliers/:supplierId`
 - `GET /projects/:projectId/suppliers/:supplierId/ledger`
+
+A supplier carries an optional `taxId` — the Uzbek taxpayer id (ИНН/СТИР),
+exactly nine digits, sent and returned as a string so a leading zero is
+never lost. Anything else is a 400; omitting it entirely is valid, and it
+can be filled in later through `PATCH`.
 
 Advances:
 

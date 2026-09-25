@@ -300,6 +300,7 @@ export class ReportsService {
       });
       return page.map((row): CellValue[] => [
         row.name,
+        row.taxId,
         row.contactPerson,
         row.phone,
         row.comment,
@@ -316,6 +317,7 @@ export class ReportsService {
         name: 'Suppliers',
         columns: [
           { header: 'Name' },
+          { header: 'Tax ID (ИНН)' },
           { header: 'Contact Person' },
           { header: 'Phone' },
           { header: 'Comment', width: 30 },

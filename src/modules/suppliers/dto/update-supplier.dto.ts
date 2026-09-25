@@ -1,5 +1,11 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsOptional, IsString, Length } from 'class-validator';
+import {
+  IsBoolean,
+  IsOptional,
+  IsString,
+  Length,
+  Matches,
+} from 'class-validator';
 
 export class UpdateSupplierDto {
   @ApiPropertyOptional()
@@ -19,6 +25,17 @@ export class UpdateSupplierDto {
   @IsString()
   @Length(1, 50)
   phone?: string;
+
+  @ApiPropertyOptional({
+    example: '123456789',
+    description:
+      'Uzbek taxpayer id (ИНН/СТИР): exactly nine digits, or omitted.',
+  })
+  @IsOptional()
+  @Matches(/^\d{9}$/, {
+    message: 'taxId must be exactly nine digits',
+  })
+  taxId?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

@@ -6,6 +6,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Req,
 } from '@nestjs/common';
 import {
@@ -22,6 +23,7 @@ import { ErrorResponseDto } from '../../common/dto/error-response.dto.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.js';
 import { CreateSupplierDto } from './dto/create-supplier.dto.js';
+import { ListSuppliersQueryDto } from './dto/list-suppliers-query.dto.js';
 import { SupplierResponseDto } from './dto/supplier-response.dto.js';
 import { UpdateSupplierDto } from './dto/update-supplier.dto.js';
 import { SuppliersService } from './suppliers.service.js';
@@ -33,14 +35,19 @@ export class SuppliersController {
   constructor(private readonly suppliersService: SuppliersService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List suppliers in a project' })
+  @ApiOperation({
+    summary: 'List suppliers in a project',
+    description:
+      'Optionally filtered by active state and a case-insensitive search over name, contact person, phone and taxpayer id.',
+  })
   @ApiOkResponse({ type: [SupplierResponseDto] })
   @ApiForbiddenResponse({ type: ErrorResponseDto })
   list(
     @CurrentUser() user: AuthenticatedUser,
     @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Query() query: ListSuppliersQueryDto,
   ): Promise<SupplierResponseDto[]> {
-    return this.suppliersService.list(user, projectId);
+    return this.suppliersService.list(user, projectId, query);
   }
 
   @Get(':supplierId')
