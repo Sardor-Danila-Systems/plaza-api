@@ -169,6 +169,56 @@ describe('Suppliers, advances, and debt payments (e2e)', () => {
       }
     });
 
+    it('PATCH null clears an optional field; omitting the key leaves it untouched; empty string is still rejected', async () => {
+      const { project, token } = await setupProjectAndManager();
+      try {
+        const created = await request(app.getHttpServer())
+          .post(`/projects/${project.id}/suppliers`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({
+            name: 'Clearable Supplies',
+            contactPerson: 'Alisher',
+            phone: '+998901112233',
+            taxId: '123456789',
+            comment: 'some note',
+          })
+          .expect(201);
+
+        // Omitting a key entirely: every other field stays exactly as it
+        // was (this is what distinguishes "not provided" from "clear").
+        const untouched = await request(app.getHttpServer())
+          .patch(`/projects/${project.id}/suppliers/${created.body.id}`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ comment: 'updated note' })
+          .expect(200);
+        expect(untouched.body.contactPerson).toBe('Alisher');
+        expect(untouched.body.phone).toBe('+998901112233');
+        expect(untouched.body.taxId).toBe('123456789');
+        expect(untouched.body.comment).toBe('updated note');
+
+        // Explicit null clears each field.
+        const cleared = await request(app.getHttpServer())
+          .patch(`/projects/${project.id}/suppliers/${created.body.id}`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ contactPerson: null, phone: null, taxId: null, comment: null })
+          .expect(200);
+        expect(cleared.body.contactPerson).toBeNull();
+        expect(cleared.body.phone).toBeNull();
+        expect(cleared.body.taxId).toBeNull();
+        expect(cleared.body.comment).toBeNull();
+
+        // Empty string is not the same as null — still a validation error,
+        // never a silent clear via the wrong value.
+        await request(app.getHttpServer())
+          .patch(`/projects/${project.id}/suppliers/${created.body.id}`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ taxId: '' })
+          .expect(400);
+      } finally {
+        await deleteTestProject(prisma.client, project.id);
+      }
+    });
+
     it('searches suppliers by name, contact person, phone and taxpayer id', async () => {
       const { project, token } = await setupProjectAndManager();
       try {
