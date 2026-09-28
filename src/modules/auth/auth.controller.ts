@@ -225,6 +225,9 @@ export class AuthController {
       sameSite: this.config.cookieSameSite,
       path: AUTH_COOKIE_PATH,
       maxAge: this.config.refreshTokenTtlMs,
+      // Omitted entirely (undefined) when COOKIE_DOMAIN isn't set — same
+      // host-only behavior as before this option existed.
+      ...(this.config.cookieDomain ? { domain: this.config.cookieDomain } : {}),
     };
     response.cookie(REFRESH_TOKEN_COOKIE, refreshSecret, cookieOptions);
     response.cookie(CSRF_TOKEN_COOKIE, csrfToken, {
@@ -234,7 +237,14 @@ export class AuthController {
   }
 
   private clearAuthCookies(response: Response): void {
-    response.clearCookie(REFRESH_TOKEN_COOKIE, { path: AUTH_COOKIE_PATH });
-    response.clearCookie(CSRF_TOKEN_COOKIE, { path: AUTH_COOKIE_PATH });
+    // clearCookie must be called with the SAME path/domain the cookie was
+    // set with, or the browser treats it as an unrelated cookie and the
+    // original one is never actually removed.
+    const clearOptions = {
+      path: AUTH_COOKIE_PATH,
+      ...(this.config.cookieDomain ? { domain: this.config.cookieDomain } : {}),
+    };
+    response.clearCookie(REFRESH_TOKEN_COOKIE, clearOptions);
+    response.clearCookie(CSRF_TOKEN_COOKIE, clearOptions);
   }
 }

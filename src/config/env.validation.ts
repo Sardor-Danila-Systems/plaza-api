@@ -82,6 +82,25 @@ class EnvironmentVariables {
   @IsEnum(['lax', 'none'] as const)
   COOKIE_SAMESITE?: 'lax' | 'none';
 
+  /**
+   * Without this, the refresh/CSRF cookies get no `Domain` attribute at
+   * all, which makes them host-only — visible ONLY to the exact host that
+   * set them (e.g. `api.example.com`), never to a sibling subdomain like
+   * `app.example.com`. That's invisible in same-host local dev (frontend
+   * and backend differ only by port, and cookie scope ignores port per RFC
+   * 6265), but in a real subdomain-split deployment it means the
+   * frontend's own CSRF-bridge mechanism can never read `csrf_token` via
+   * `document.cookie` no matter what page/path serves it — `/auth/refresh`
+   * then always 403s on a missing CSRF header, and every page reload logs
+   * the user out (the access token is in-memory only, so a reload always
+   * needs a successful refresh). Set this to `.example.com` (leading dot
+   * optional, modern browsers treat it the same as no dot) to make the
+   * cookie valid across every subdomain of that registrable domain.
+   */
+  @IsOptional()
+  @IsString()
+  COOKIE_DOMAIN?: string;
+
   @IsOptional()
   @IsEnum(['true', 'false'] as const)
   SWAGGER_ENABLED?: 'true' | 'false';

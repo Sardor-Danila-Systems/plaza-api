@@ -92,6 +92,13 @@ export class AppConfigService {
     return this.configService.get('COOKIE_SAMESITE', { infer: true }) ?? 'lax';
   }
 
+  /** See COOKIE_DOMAIN in src/config/env.validation.ts. `undefined` (the
+   * local-dev default) omits the cookie's Domain attribute entirely,
+   * making it host-only — exactly the prior behavior, unchanged. */
+  get cookieDomain(): string | undefined {
+    return this.configService.get('COOKIE_DOMAIN', { infer: true });
+  }
+
   // --- Phase 9: attachment storage ---
 
   get storageDriver(): 'local' | 's3' {
