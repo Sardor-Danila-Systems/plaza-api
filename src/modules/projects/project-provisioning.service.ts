@@ -127,7 +127,13 @@ export class ProjectProvisioningService {
       return;
     }
 
-    if (projectId) {
+    if (role === Role.CASHIER) {
+      if (!projectId) {
+        throw new BadRequestException(
+          'projectId is required when role is CASHIER',
+        );
+      }
+    } else if (projectId) {
       throw new BadRequestException(
         `projectId must not be supplied when role is ${role}`,
       );
@@ -139,10 +145,20 @@ export class ProjectProvisioningService {
     if (!user) {
       throw new NotFoundException(`User ${userId} not found`);
     }
+    if (role === Role.CASHIER) {
+      const project = await this.prisma.client.project.findUnique({
+        where: { id: projectId },
+      });
+      if (!project) {
+        throw new NotFoundException(`Project ${projectId} not found`);
+      }
+    }
 
+    // Unlike a manager there is no "one per project" rule to preserve: a
+    // project may have any number of cashiers, so this is a plain update.
     await this.prisma.client.user.update({
       where: { id: userId },
-      data: { role, projectId: null },
+      data: { role, projectId: role === Role.CASHIER ? projectId! : null },
     });
   }
 
@@ -176,10 +192,12 @@ export class ProjectProvisioningService {
       throw new BadRequestException(`Invalid user input:\n${details}`);
     }
 
-    if (dto.role === Role.PROJECT_MANAGER) {
+    const projectScoped =
+      dto.role === Role.PROJECT_MANAGER || dto.role === Role.CASHIER;
+    if (projectScoped) {
       if (!dto.projectId) {
         throw new BadRequestException(
-          'projectId is required when role is PROJECT_MANAGER',
+          `projectId is required when role is ${dto.role}`,
         );
       }
     } else if (dto.projectId) {
@@ -194,13 +212,15 @@ export class ProjectProvisioningService {
     let user: User;
     try {
       user = await this.prisma.client.$transaction(async (tx) => {
-        if (dto.role === Role.PROJECT_MANAGER) {
+        if (projectScoped) {
           const project = await tx.project.findUnique({
             where: { id: dto.projectId },
           });
           if (!project) {
             throw new NotFoundException(`Project ${dto.projectId} not found`);
           }
+        }
+        if (dto.role === Role.PROJECT_MANAGER) {
           // Same invariant-preserving statement order as assignManager
           // (see its doc comment): deactivate any existing active manager
           // of this project BEFORE creating the new active manager row —
@@ -222,8 +242,7 @@ export class ProjectProvisioningService {
             displayName: dto.displayName,
             role: dto.role,
             passwordHash,
-            projectId:
-              dto.role === Role.PROJECT_MANAGER ? dto.projectId! : null,
+            projectId: projectScoped ? dto.projectId! : null,
           },
         });
       });

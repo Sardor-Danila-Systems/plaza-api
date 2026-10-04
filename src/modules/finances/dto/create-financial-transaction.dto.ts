@@ -8,6 +8,7 @@ import {
   Length,
 } from 'class-validator';
 import {
+  CashAccount,
   Currency,
   FinancialTransactionType,
 } from '../../../generated/prisma/client.js';
@@ -43,6 +44,16 @@ export class CreateFinancialTransactionDto {
   @ApiProperty({ enum: Currency })
   @IsEnum(Currency)
   currency!: Currency;
+
+  @ApiProperty({
+    enum: CashAccount,
+    required: false,
+    default: CashAccount.CASH,
+    description: 'Which cash account the money moves through (Наличные / Банк).',
+  })
+  @IsOptional()
+  @IsEnum(CashAccount)
+  account?: CashAccount;
 
   @ApiProperty({
     required: false,

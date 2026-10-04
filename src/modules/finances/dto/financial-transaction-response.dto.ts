@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
+  CashAccount,
   Currency,
   FinancialTransactionType,
   RateSource,
@@ -27,6 +28,9 @@ export class FinancialTransactionResponseDto {
 
   @ApiProperty({ enum: Currency })
   currency!: Currency;
+
+  @ApiProperty({ enum: CashAccount })
+  account!: CashAccount;
 
   @ApiProperty({
     example: '1',

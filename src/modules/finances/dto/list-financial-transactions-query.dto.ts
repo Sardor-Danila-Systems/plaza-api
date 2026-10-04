@@ -10,6 +10,7 @@ import {
   Min,
 } from 'class-validator';
 import {
+  CashAccount,
   Currency,
   FinancialTransactionType,
 } from '../../../generated/prisma/client.js';
@@ -51,6 +52,11 @@ export class ListFinancialTransactionsQueryDto {
   @IsOptional()
   @IsEnum(Currency)
   currency?: Currency;
+
+  @ApiPropertyOptional({ enum: CashAccount })
+  @IsOptional()
+  @IsEnum(CashAccount)
+  account?: CashAccount;
 
   @ApiPropertyOptional({
     default: false,

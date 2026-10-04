@@ -13,6 +13,7 @@ import {
 } from '../../database/project-lock.service.js';
 import { PrismaService } from '../../database/prisma.service.js';
 import {
+  CashAccount,
   Currency,
   FinancialTransaction,
   FinancialTransactionType,
@@ -24,6 +25,7 @@ import {
 import { AuditService } from '../audit/audit.service.js';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.js';
 import { ProjectAccessAction } from '../projects/project-access-action.enum.js';
+import { ProjectAccessArea } from '../projects/project-access-area.enum.js';
 import { ProjectAccessService } from '../projects/project-access.service.js';
 import { CancelFinancialTransactionDto } from './dto/cancel-financial-transaction.dto.js';
 import { CreateFinancialTransactionDto } from './dto/create-financial-transaction.dto.js';
@@ -106,6 +108,7 @@ export class FinancialPostingService {
       type: dto.type,
       amount: dto.amount,
       currency: dto.currency,
+      account: dto.account,
       exchangeRate: dto.exchangeRate,
       currencyRateId: dto.currencyRateId,
       rateOverrideReason: dto.rateOverrideReason,
@@ -123,6 +126,7 @@ export class FinancialPostingService {
           user.id,
           projectId,
           ProjectAccessAction.WRITE,
+          ProjectAccessArea.CASH,
         );
 
         const replay = await this.findIdempotentReplay(
@@ -156,12 +160,14 @@ export class FinancialPostingService {
         const amountUzs = computeAmountUzs(amount, exchangeRate);
         const direction = directionForType(dto.type);
 
+        const account = dto.account ?? CashAccount.CASH;
         if (direction === TransactionDirection.OUT) {
           await this.assertSufficientBalance(
             tx,
             projectId,
             dto.currency,
             amount,
+            account,
           );
         }
 
@@ -194,6 +200,7 @@ export class FinancialPostingService {
             direction,
             amount,
             currency: dto.currency,
+            account,
             exchangeRate,
             amountUzs,
             rateSource,
@@ -247,6 +254,7 @@ export class FinancialPostingService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.CASH,
     );
 
     const where: Prisma.FinancialTransactionWhereInput = { projectId };
@@ -261,6 +269,9 @@ export class FinancialPostingService {
     }
     if (query.currency) {
       where.currency = query.currency;
+    }
+    if (query.account) {
+      where.account = query.account;
     }
     if (query.dateFrom || query.dateTo) {
       where.occurredAt = {
@@ -303,6 +314,7 @@ export class FinancialPostingService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.CASH,
     );
     const transaction = await this.getTransactionOrThrow(
       projectId,
@@ -319,6 +331,7 @@ export class FinancialPostingService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.CASH,
     );
     const uzs = await this.computeBalance(
       this.prisma.client,
@@ -330,7 +343,28 @@ export class FinancialPostingService {
       projectId,
       Currency.USD,
     );
-    return { uzs: uzs.toFixed(2), usd: usd.toFixed(2) };
+    const byAccount = await Promise.all(
+      Object.values(CashAccount).map(async (account) => ({
+        account,
+        uzs: (
+          await this.computeBalance(
+            this.prisma.client,
+            projectId,
+            Currency.UZS,
+            account,
+          )
+        ).toFixed(2),
+        usd: (
+          await this.computeBalance(
+            this.prisma.client,
+            projectId,
+            Currency.USD,
+            account,
+          )
+        ).toFixed(2),
+      })),
+    );
+    return { uzs: uzs.toFixed(2), usd: usd.toFixed(2), byAccount };
   }
 
   /**
@@ -350,6 +384,7 @@ export class FinancialPostingService {
       user,
       projectId,
       ProjectAccessAction.WRITE,
+      ProjectAccessArea.CASH,
     );
     const existing = await this.getTransactionOrThrow(projectId, transactionId);
 
@@ -397,6 +432,7 @@ export class FinancialPostingService {
           user.id,
           projectId,
           ProjectAccessAction.WRITE,
+          ProjectAccessArea.CASH,
         );
 
         const replay = await this.findIdempotentReplay(
@@ -432,6 +468,17 @@ export class FinancialPostingService {
             message: 'A reversal transaction cannot itself be cancelled',
           });
         }
+        // The cash leg of a purchase, advance or debt payment is one half of
+        // a supplier settlement. Reversing it here would put the money back
+        // while the purchase stayed "paid" and the debt stayed settled — it
+        // can only be undone by cancelling the operation that owns it.
+        if (original.supplierPaymentId) {
+          throw new ConflictException({
+            code: 'CANCEL_VIA_SOURCE_OPERATION',
+            message:
+              'This cash movement belongs to a supplier operation; cancel that operation instead',
+          });
+        }
 
         const reversalDirection =
           original.direction === TransactionDirection.IN
@@ -448,6 +495,7 @@ export class FinancialPostingService {
             projectId,
             original.currency,
             original.amount,
+            original.account,
           );
         }
 
@@ -491,6 +539,7 @@ export class FinancialPostingService {
             direction: reversalDirection,
             amount: original.amount,
             currency: original.currency,
+            account: original.account,
             exchangeRate: original.exchangeRate,
             amountUzs: original.amountUzs,
             rateSource: original.rateSource,
@@ -754,6 +803,8 @@ export class FinancialPostingService {
       type: FinancialTransactionType;
       amount: Prisma.Decimal;
       currency: Currency;
+      /** Which cash account pays (or receives). Defaults to CASH. */
+      account?: CashAccount;
       exchangeRate: Prisma.Decimal;
       amountUzs: Prisma.Decimal;
       rateSource: RateSource;
@@ -767,12 +818,14 @@ export class FinancialPostingService {
     },
   ): Promise<FinancialTransaction> {
     const direction = directionForType(params.type);
+    const account = params.account ?? CashAccount.CASH;
     if (direction === TransactionDirection.OUT) {
       await this.assertSufficientBalance(
         tx,
         params.projectId,
         params.currency,
         params.amount,
+        account,
       );
     }
     return tx.financialTransaction.create({
@@ -783,6 +836,7 @@ export class FinancialPostingService {
         direction,
         amount: params.amount,
         currency: params.currency,
+        account,
         exchangeRate: params.exchangeRate,
         amountUzs: params.amountUzs,
         rateSource: params.rateSource,
@@ -851,6 +905,7 @@ export class FinancialPostingService {
         params.projectId,
         original.currency,
         original.amount,
+        original.account,
       );
     }
 
@@ -871,6 +926,7 @@ export class FinancialPostingService {
         direction: reversalDirection,
         amount: original.amount,
         currency: original.currency,
+        account: original.account,
         exchangeRate: original.exchangeRate,
         amountUzs: original.amountUzs,
         rateSource: original.rateSource,
@@ -885,14 +941,17 @@ export class FinancialPostingService {
     });
   }
 
+  /** Nominal balance of one currency — in one cash account when `account`
+   * is given, or across both when it is omitted (the project total). */
   async computeBalance(
     client: PrismaTx | PrismaService['client'],
     projectId: string,
     currency: Currency,
+    account?: CashAccount,
   ): Promise<Prisma.Decimal> {
     const grouped = await client.financialTransaction.groupBy({
       by: ['direction'],
-      where: { projectId, currency },
+      where: { projectId, currency, ...(account ? { account } : {}) },
       _sum: { amount: true },
     });
     let inSum = new Prisma.Decimal(0);
@@ -907,17 +966,20 @@ export class FinancialPostingService {
     return inSum.minus(outSum);
   }
 
+  /** Always checked against ONE account: money in the safe cannot cover a
+   * bank payment, so a project-wide total would approve overdrafts. */
   async assertSufficientBalance(
     tx: PrismaTx,
     projectId: string,
     currency: Currency,
     amount: Prisma.Decimal,
+    account: CashAccount,
   ): Promise<void> {
-    const balance = await this.computeBalance(tx, projectId, currency);
+    const balance = await this.computeBalance(tx, projectId, currency, account);
     if (balance.lessThan(amount)) {
       throw new ConflictException({
         code: 'INSUFFICIENT_CASH',
-        message: `Insufficient ${currency} balance: available ${balance.toFixed(2)}, requested ${amount.toFixed(2)}`,
+        message: `Insufficient ${currency} balance in ${account}: available ${balance.toFixed(2)}, requested ${amount.toFixed(2)}`,
       });
     }
   }
@@ -951,6 +1013,7 @@ export class FinancialPostingService {
       direction: row.direction,
       amount: row.amount.toFixed(2),
       currency: row.currency,
+      account: row.account,
       exchangeRate: row.exchangeRate.toFixed(8),
       amountUzs: row.amountUzs.toFixed(2),
       rateSource: row.rateSource,

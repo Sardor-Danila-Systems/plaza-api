@@ -10,7 +10,7 @@ import {
   Length,
   ValidateNested,
 } from 'class-validator';
-import { Currency } from '../../../generated/prisma/client.js';
+import { CashAccount, Currency } from '../../../generated/prisma/client.js';
 import { IsBusinessDate } from '../../../common/validators/is-business-date.validator.js';
 import { IsDecimalString } from '../../../common/validators/decimal-string.validator.js';
 import { IsValidCurrencyRateShape } from '../../../common/validators/currency-rate-shape.validator.js';
@@ -40,6 +40,16 @@ export class CreatePurchaseDto {
   @IsEnum(Currency)
   @IsValidCurrencyRateShape()
   currency!: Currency;
+
+  @ApiProperty({
+    enum: CashAccount,
+    required: false,
+    default: CashAccount.CASH,
+    description: 'Which cash account pays `cashPaid`. Ignored when nothing is paid now.',
+  })
+  @IsOptional()
+  @IsEnum(CashAccount)
+  account?: CashAccount;
 
   @ApiProperty({ required: false, example: '12500.00000000' })
   @IsOptional()

@@ -8,6 +8,7 @@ import { PrismaService } from '../../database/prisma.service.js';
 import { Project, Role, User } from '../../generated/prisma/client.js';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.js';
 import { ProjectAccessAction } from './project-access-action.enum.js';
+import { ProjectAccessArea } from './project-access-area.enum.js';
 
 /**
  * The Phase 3+ authorization primitive for every project-scoped resource
@@ -19,6 +20,8 @@ import { ProjectAccessAction } from './project-access-action.enum.js';
  * Policy:
  * - OWNER / ACCOUNTANT: READ any active project, WRITE none.
  * - PROJECT_MANAGER: READ/WRITE only their own assigned (active) project.
+ * - CASHIER: READ/WRITE only their own assigned project, and only in
+ *   `ProjectAccessArea.CASH` — denied everywhere else (see that enum).
  *
  * Authorization is checked BEFORE existence: a request for a project outside
  * the caller's authority returns 403 `PROJECT_ACCESS_DENIED` whether or not
@@ -35,15 +38,9 @@ export class ProjectAccessService {
     user: AuthenticatedUser,
     projectId: string,
     action: ProjectAccessAction,
+    area: ProjectAccessArea = ProjectAccessArea.GENERAL,
   ): Promise<Project> {
-    if (user.role === Role.PROJECT_MANAGER) {
-      if (user.projectId !== projectId) {
-        throw this.accessDenied();
-      }
-    } else if (action === ProjectAccessAction.WRITE) {
-      // OWNER and ACCOUNTANT can never write, regardless of which project.
-      throw this.accessDenied();
-    }
+    this.assertPolicy(user.role, user.projectId, projectId, action, area);
 
     const project = await this.prisma.client.project.findUnique({
       where: { id: projectId },
@@ -82,19 +79,14 @@ export class ProjectAccessService {
     actorId: string,
     projectId: string,
     action: ProjectAccessAction,
+    area: ProjectAccessArea = ProjectAccessArea.GENERAL,
   ): Promise<{ project: Project; actor: User }> {
     const actor = await tx.user.findUnique({ where: { id: actorId } });
     if (!actor || !actor.isActive) {
       throw this.accessDenied();
     }
 
-    if (actor.role === Role.PROJECT_MANAGER) {
-      if (actor.projectId !== projectId) {
-        throw this.accessDenied();
-      }
-    } else if (action === ProjectAccessAction.WRITE) {
-      throw this.accessDenied();
-    }
+    this.assertPolicy(actor.role, actor.projectId, projectId, action, area);
 
     const project = await tx.project.findUnique({ where: { id: projectId } });
     if (!project || !project.isActive) {
@@ -105,6 +97,32 @@ export class ProjectAccessService {
     }
 
     return { project, actor };
+  }
+
+  /** The one place the role/project/action/area policy lives, shared by
+   * both entry points so the request-time and in-transaction checks can
+   * never drift apart. */
+  private assertPolicy(
+    role: Role,
+    assignedProjectId: string | null,
+    projectId: string,
+    action: ProjectAccessAction,
+    area: ProjectAccessArea,
+  ): void {
+    switch (role) {
+      case Role.PROJECT_MANAGER:
+        if (assignedProjectId !== projectId) throw this.accessDenied();
+        return;
+      case Role.CASHIER:
+        if (assignedProjectId !== projectId) throw this.accessDenied();
+        if (area !== ProjectAccessArea.CASH) throw this.accessDenied();
+        return;
+      case Role.OWNER:
+      case Role.ACCOUNTANT:
+        // Read anything, write nothing, regardless of which project.
+        if (action === ProjectAccessAction.WRITE) throw this.accessDenied();
+        return;
+    }
   }
 
   private accessDenied(): ForbiddenException {

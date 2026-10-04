@@ -17,6 +17,7 @@ import {
 import { AuditService } from '../audit/audit.service.js';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.js';
 import { ProjectAccessAction } from '../projects/project-access-action.enum.js';
+import { ProjectAccessArea } from '../projects/project-access-area.enum.js';
 import { ProjectAccessService } from '../projects/project-access.service.js';
 import {
   UnsupportedFileTypeError,
@@ -70,10 +71,15 @@ export class AttachmentsService {
     file: Express.Multer.File,
     requestId?: string,
   ): Promise<AttachmentResponseDto> {
+    // A staged upload belongs to no record yet, so it needs only the
+    // narrowest write access anyone holds — a cashier attaching a receipt
+    // stages the file exactly like a manager does. What it may be LINKED to
+    // is decided in `link`.
     await this.projectAccess.assertAccess(
       user,
       projectId,
       ProjectAccessAction.WRITE,
+      ProjectAccessArea.CASH,
     );
 
     if (file.size > this.config.attachmentMaxSizeBytes) {
@@ -167,6 +173,7 @@ export class AttachmentsService {
       user,
       projectId,
       ProjectAccessAction.WRITE,
+      areaForTarget(dto.target),
     );
 
     const attachment = await this.getOwnAttachmentOrThrow(
@@ -217,10 +224,13 @@ export class AttachmentsService {
     projectId: string,
     query: ListAttachmentsQueryDto,
   ): Promise<PaginatedAttachmentsResponseDto> {
+    // Unfiltered listing spans every target, so it is GENERAL; a cashier
+    // can only ever list the files of one cash transaction.
     await this.projectAccess.assertAccess(
       user,
       projectId,
       ProjectAccessAction.READ,
+      query.target ? areaForTarget(query.target) : ProjectAccessArea.GENERAL,
     );
 
     if (
@@ -266,13 +276,8 @@ export class AttachmentsService {
     projectId: string,
     attachmentId: string,
   ): Promise<AttachmentResponseDto> {
-    await this.projectAccess.assertAccess(
-      user,
-      projectId,
-      ProjectAccessAction.READ,
-    );
     return this.toResponse(
-      await this.getOwnAttachmentOrThrow(projectId, attachmentId),
+      await this.getReadableAttachmentOrThrow(user, projectId, attachmentId),
     );
   }
 
@@ -289,12 +294,8 @@ export class AttachmentsService {
     projectId: string,
     attachmentId: string,
   ): Promise<DownloadedAttachment> {
-    await this.projectAccess.assertAccess(
+    const attachment = await this.getReadableAttachmentOrThrow(
       user,
-      projectId,
-      ProjectAccessAction.READ,
-    );
-    const attachment = await this.getOwnAttachmentOrThrow(
       projectId,
       attachmentId,
     );
@@ -340,10 +341,13 @@ export class AttachmentsService {
     attachmentId: string,
     requestId?: string,
   ): Promise<void> {
+    // Only ever an unlinked (orphan) file — see `upload` for why CASH is
+    // enough to manage one.
     await this.projectAccess.assertAccess(
       user,
       projectId,
       ProjectAccessAction.WRITE,
+      ProjectAccessArea.CASH,
     );
     const attachment = await this.getOwnAttachmentOrThrow(
       projectId,
@@ -375,6 +379,45 @@ export class AttachmentsService {
   // ---------------------------------------------------------------------
   // Internal helpers
   // ---------------------------------------------------------------------
+
+  /**
+   * Which area reading an existing attachment falls under depends on what
+   * it is linked to, which is only known after loading it. Membership of
+   * the project is checked first (the narrowest area, so it never leaks
+   * another project's files), then the real area once the target is known —
+   * a cashier can open a cash transaction's receipt, never a purchase's.
+   */
+  private async getReadableAttachmentOrThrow(
+    user: AuthenticatedUser,
+    projectId: string,
+    attachmentId: string,
+  ): Promise<Attachment> {
+    await this.projectAccess.assertAccess(
+      user,
+      projectId,
+      ProjectAccessAction.READ,
+      ProjectAccessArea.CASH,
+    );
+    const attachment = await this.getOwnAttachmentOrThrow(
+      projectId,
+      attachmentId,
+    );
+    const area = attachment.financialTransactionId
+      ? ProjectAccessArea.CASH
+      : attachment.purchaseId || attachment.supplierPaymentId
+        ? ProjectAccessArea.GENERAL
+        : // Unlinked: only its staging flow ever reads it — see `upload`.
+          ProjectAccessArea.CASH;
+    if (area !== ProjectAccessArea.CASH) {
+      await this.projectAccess.assertAccess(
+        user,
+        projectId,
+        ProjectAccessAction.READ,
+        area,
+      );
+    }
+    return attachment;
+  }
 
   private async getOwnAttachmentOrThrow(
     projectId: string,
@@ -493,4 +536,12 @@ export class AttachmentsService {
       targetId,
     };
   }
+}
+
+/** Cash-transaction files are part of the cash ledger; purchase and
+ * supplier-payment files are not. */
+function areaForTarget(target: AttachmentTarget): ProjectAccessArea {
+  return target === AttachmentTarget.FINANCIAL_TRANSACTION
+    ? ProjectAccessArea.CASH
+    : ProjectAccessArea.GENERAL;
 }

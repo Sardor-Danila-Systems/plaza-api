@@ -3,6 +3,7 @@ import { PrismaService } from '../../database/prisma.service.js';
 import { Project, Role, User } from '../../generated/prisma/client.js';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.js';
 import { ProjectAccessAction } from './project-access-action.enum.js';
+import { ProjectAccessArea } from './project-access-area.enum.js';
 import { ProjectAccessService } from './project-access.service.js';
 import { ProjectResponseDto } from './dto/project-response.dto.js';
 
@@ -29,8 +30,10 @@ export class ProjectsService {
    * degrades safely either way).
    */
   async listForUser(user: AuthenticatedUser): Promise<ProjectResponseDto[]> {
+    // Project-scoped roles (a manager, a cashier) only ever see the one
+    // project they are assigned to.
     const where =
-      user.role === Role.PROJECT_MANAGER
+      user.role === Role.PROJECT_MANAGER || user.role === Role.CASHIER
         ? { id: user.projectId ?? '', isActive: true }
         : { isActive: true };
 
@@ -49,10 +52,13 @@ export class ProjectsService {
     user: AuthenticatedUser,
     projectId: string,
   ): Promise<ProjectResponseDto> {
+    // The project's own name/code is what every screen is titled with, a
+    // cashier's included — reading it is part of the CASH area.
     await this.projectAccess.assertAccess(
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.CASH,
     );
 
     // assertAccess already proved this project exists and is authorized for

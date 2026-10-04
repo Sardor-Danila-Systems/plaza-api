@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEnum, IsOptional, IsString, IsUUID, Length } from 'class-validator';
-import { Currency } from '../../../../generated/prisma/client.js';
+import { CashAccount, Currency } from '../../../../generated/prisma/client.js';
 import { IsBusinessDate } from '../../../../common/validators/is-business-date.validator.js';
 import { IsDecimalString } from '../../../../common/validators/decimal-string.validator.js';
 import { IsValidCurrencyRateShape } from '../../../../common/validators/currency-rate-shape.validator.js';
@@ -25,6 +25,16 @@ export class CreateDebtPaymentDto {
   @IsEnum(Currency)
   @IsValidCurrencyRateShape()
   currency!: Currency;
+
+  @ApiProperty({
+    enum: CashAccount,
+    required: false,
+    default: CashAccount.CASH,
+    description: 'Which cash account the payment is drawn from.',
+  })
+  @IsOptional()
+  @IsEnum(CashAccount)
+  account?: CashAccount;
 
   @ApiProperty({ example: '4000000.00' })
   @IsDecimalString({ maxDecimalPlaces: 2 })

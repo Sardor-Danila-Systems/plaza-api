@@ -43,6 +43,11 @@ enum Role {
   OWNER
   PROJECT_MANAGER
   ACCOUNTANT
+  /// Runs one project's cash ledger and nothing else — suppliers,
+  /// purchases, the warehouse and construction objects are closed to it
+  /// (see ProjectAccessArea). Project-scoped like PROJECT_MANAGER, but a
+  /// project may have any number of active cashiers.
+  CASHIER
 }
 
 model Project {
@@ -251,6 +256,16 @@ enum Currency {
   USD
 }
 
+/// Which of a project's two cash accounts a ledger row moves money in or
+/// out of. Every balance — and every "insufficient cash" check — is per
+/// account: cash in the safe cannot pay a bank transfer, and the reverse.
+enum CashAccount {
+  /// Наличные — physical cash.
+  CASH
+  /// Банковский счёт — the project's bank account.
+  BANK
+}
+
 /// Declares the full set approved in docs/backend-data-model.md even though
 /// Phase 4 implements posting workflows only for INCOME, EXPENSE and
 /// SALARY — PURCHASE/ADVANCE/DEBT_PAYMENT/REFUND/ADJUSTMENT exist so a later
@@ -414,6 +429,10 @@ model FinancialTransaction {
 
   amount       Decimal  @db.Decimal(24, 2)
   currency     Currency
+  /// Every row predating the split was physical cash, hence the default.
+  /// A reversal always carries its original's account, so cancelling an
+  /// operation restores the very account it drew from.
+  account      CashAccount @default(CASH)
   /// Always populated, never null (docs/backend-architecture.md §4: "For
   /// UZS, exchangeRate = 1 and amountUzs = amount. For USD,
   /// amountUzs = round2(amount * exchangeRate)") — exactly `1` for UZS
@@ -483,6 +502,7 @@ model FinancialTransaction {
   @@unique([projectId, supplierPaymentId])
   @@index([projectId, occurredAt])
   @@index([projectId, type])
+  @@index([projectId, account, currency])
   @@index([projectId, categoryId])
   @@index([projectId, cancelledAt])
   @@index([operationId])

@@ -39,6 +39,27 @@ There is no global `/api/v1` prefix in the shipped backend.
 - `OWNER`: can read across projects; cannot mutate write-offs/transfers.
 - `ACCOUNTANT`: can read project finance/inventory data; cannot mutate write-offs/transfers.
 - `PROJECT_MANAGER`: can mutate only the active project assigned to the manager.
+- `CASHIER`: project-scoped like a manager, any number per project. Reads and
+  writes **only the cash ledger** of their own project — `/finances*`,
+  `/transaction-categories`, `GET /projects[/:id]`, and attachments linked to
+  a financial transaction. Every other endpoint answers 403
+  `PROJECT_ACCESS_DENIED`. Server-side this is `ProjectAccessArea`: every
+  access check defaults to `GENERAL`, so a new endpoint is closed to cashiers
+  until it explicitly opts in to `CASH`.
+
+### Cash accounts
+
+Every cash-moving request (`POST /finances`, purchases with `cashPaid`,
+advances, debt payments) takes an optional `account`: `CASH` (Наличные, the
+default) or `BANK` (Банковский счёт). Balances and the `INSUFFICIENT_CASH`
+check are per account — money in one cannot cover a payment from the other.
+`GET /finances/balance` returns the totals plus `byAccount`; `GET /finances`
+accepts `?account=`. A cancellation always reverses into the original's
+account.
+
+The cash leg of a purchase, advance or debt payment cannot be cancelled
+through `POST /finances/:id/cancel` (409 `CANCEL_VIA_SOURCE_OPERATION`) —
+reversing only the money would leave the purchase paid and the debt settled.
 
 Project access is enforced by URL `projectId`, server-side ownership checks, and composite foreign keys. Clients must not send `projectId`, `createdById`, calculated totals, or movement metadata in bodies.
 

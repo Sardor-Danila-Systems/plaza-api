@@ -136,6 +136,35 @@ DATABASE_URL="<pooled-строка-из-Neon>" npx prisma migrate deploy
 Render Shell. Никогда не используйте `prisma db push` и `migrate dev`
 против продакшена — только `migrate deploy`.
 
+Релиз «кассир и две кассы» содержит две миграции, которые нужно
+накатить именно двумя шагами — `migrate deploy` делает это сам, по
+порядку:
+
+- `20261004100000_cashier_role` — добавляет значение `CASHIER` в enum
+  ролей. Отдельной миграцией намеренно: PostgreSQL не даёт использовать
+  новое значение enum в той же транзакции, где его добавили.
+- `20261004100100_cash_accounts` — разрешает `projectId` для кассира и
+  добавляет колонку `FinancialTransaction.account` (`CASH` / `BANK`) со
+  значением по умолчанию `CASH`. **Все существующие операции станут
+  «Наличными»** — если часть исторических денег на самом деле лежит в
+  банке, остаток банка начнётся с нуля и его нужно завести отдельным
+  приходом на «Банковский счёт».
+
+Обе обратно совместимы со старым кодом API (новая колонка имеет default,
+новое значение enum старый код просто не встречает).
+
+**Перед деплоем проверьте, нет ли в базе операций в долларах** — USD
+убран из интерфейса, и такие остатки перестанут быть видны:
+
+```sql
+SELECT currency, count(*), sum(CASE WHEN direction = 'IN' THEN amount ELSE -amount END)
+FROM "FinancialTransaction" GROUP BY currency;
+```
+
+Если строка `USD` есть и сумма не ноль — эти деньги нужно перевести в
+сумы операциями (расход в USD → приход в UZS) до релиза, пока интерфейс
+ещё умеет USD.
+
 Текущий релиз содержит миграцию `20260923120000_writeoff_optional_floor`
 (списание материала на блок целиком, без этажа). Она обратно совместима:
 делает `StockWriteOff.floorId` необязательным, существующие строки не
@@ -170,6 +199,13 @@ CREATE_USER_PASSWORD='длинная случайная фраза' \
 CREATE_USER_PASSWORD='другая случайная фраза' \
   npm run provision -- create-user \
   --role PROJECT_MANAGER --email manager@example.com --name "Имя Фамилия" \
+  --project euro-plaza
+
+# Сотрудники, которые ведут только кассу (их может быть сколько угодно
+# на проект; у каждого свой логин и пароль):
+CREATE_USER_PASSWORD='ещё одна фраза' \
+  npm run provision -- create-user \
+  --role CASHIER --email kassa1@example.com --name "Имя Фамилия" \
   --project euro-plaza
 
 # Изменить роль/проект уже существующего пользователя — set-role/assign-manager:

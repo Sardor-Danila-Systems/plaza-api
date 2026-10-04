@@ -8,6 +8,7 @@ import { PrismaService } from '../../../database/prisma.service.js';
 import { TransactionCategory } from '../../../generated/prisma/client.js';
 import { AuthenticatedUser } from '../../auth/types/authenticated-user.js';
 import { ProjectAccessAction } from '../../projects/project-access-action.enum.js';
+import { ProjectAccessArea } from '../../projects/project-access-area.enum.js';
 import { ProjectAccessService } from '../../projects/project-access.service.js';
 import { CreateTransactionCategoryDto } from './dto/create-transaction-category.dto.js';
 import { TransactionCategoryResponseDto } from './dto/transaction-category-response.dto.js';
@@ -28,6 +29,7 @@ export class TransactionCategoriesService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.CASH,
     );
     const categories = await this.prisma.client.transactionCategory.findMany({
       where: { projectId },
@@ -45,6 +47,7 @@ export class TransactionCategoriesService {
       user,
       projectId,
       ProjectAccessAction.WRITE,
+      ProjectAccessArea.CASH,
     );
     try {
       const category = await this.prisma.client.transactionCategory.create({
@@ -75,6 +78,7 @@ export class TransactionCategoriesService {
       user,
       projectId,
       ProjectAccessAction.WRITE,
+      ProjectAccessArea.CASH,
     );
     await this.getCategoryOrThrow(projectId, categoryId);
 
