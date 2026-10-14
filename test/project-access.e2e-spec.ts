@@ -77,12 +77,14 @@ describe('ProjectAccessService (e2e)', () => {
       ).resolves.toMatchObject({ id: otherProject.id });
     });
 
-    it('may never write, to any project', async () => {
+    it('lets the owner write to any project', async () => {
       const owner = user({ role: Role.OWNER });
       await expect(
         service.assertAccess(owner, project.id, ProjectAccessAction.WRITE),
-      ).rejects.toMatchObject({ response: { code: 'PROJECT_ACCESS_DENIED' } });
+      ).resolves.toMatchObject({ id: project.id });
+    });
 
+    it('never lets the accountant write, to any project', async () => {
       const accountant = user({ role: Role.ACCOUNTANT });
       await expect(
         service.assertAccess(accountant, project.id, ProjectAccessAction.WRITE),

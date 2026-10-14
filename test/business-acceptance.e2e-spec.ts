@@ -55,7 +55,7 @@ describe('Business acceptance scenario (e2e)', () => {
     return randomUUID();
   }
 
-  it('runs the full lifecycle for a PROJECT_MANAGER, then verifies OWNER/ACCOUNTANT read-only access', async () => {
+  it('runs the full lifecycle for a PROJECT_MANAGER, then verifies OWNER/ACCOUNTANT read access and the ACCOUNTANT write denial', async () => {
     // 1. Provision project + manager (the CLI/seed-equivalent step).
     const project = await createTestProject(
       prisma.client,
@@ -342,7 +342,7 @@ describe('Business acceptance scenario (e2e)', () => {
         .expect(409);
       expect(unsafeCancel.body.code).toBe('PURCHASE_HAS_DEPENDENT_MOVEMENTS');
 
-      // 19. OWNER: read-only access.
+      // 19. OWNER: reads any project.
       const ownerToken = await loginTestUser(app.getHttpServer(), owner.email);
       await request(app.getHttpServer())
         .get(`/projects/${project.id}/purchases/${purchaseId}`)
@@ -369,8 +369,8 @@ describe('Business acceptance scenario (e2e)', () => {
         })
         .expect(200);
 
-      // 21. Verify mutation denial for both read-only roles.
-      for (const roleToken of [ownerToken, accountantToken]) {
+      // 21. Verify mutation denial for the read-only accountant (the owner may write).
+      for (const roleToken of [accountantToken]) {
         await request(app.getHttpServer())
           .post(`/projects/${project.id}/finances`)
           .set('Authorization', `Bearer ${roleToken}`)

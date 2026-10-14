@@ -679,9 +679,11 @@ describe('Purchases (e2e)', () => {
   // Authorization
   // -----------------------------------------------------------------
   describe('Authorization', () => {
-    it('OWNER/ACCOUNTANT can read but not create purchases', async () => {
+    it('ACCOUNTANT can read but not create purchases', async () => {
       const { project } = await setupProjectAndManager();
-      const owner = await createTestUser(prisma.client, { role: Role.OWNER });
+      const owner = await createTestUser(prisma.client, {
+        role: Role.ACCOUNTANT,
+      });
       try {
         const { warehouse, material, supplier } = await setupCatalog(
           project.id,

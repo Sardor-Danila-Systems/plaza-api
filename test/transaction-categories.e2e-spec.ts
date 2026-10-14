@@ -121,12 +121,14 @@ describe('Transaction categories (e2e)', () => {
     }
   });
 
-  it('OWNER cannot create a category', async () => {
+  it('ACCOUNTANT cannot create a category', async () => {
     const project = await createTestProject(
       prisma.client,
       `Owner Category Test ${randomUUID()}`,
     );
-    const owner = await createTestUser(prisma.client, { role: Role.OWNER });
+    const owner = await createTestUser(prisma.client, {
+      role: Role.ACCOUNTANT,
+    });
     try {
       const token = await loginTestUser(app.getHttpServer(), owner.email);
       await request(app.getHttpServer())

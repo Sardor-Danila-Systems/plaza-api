@@ -102,12 +102,14 @@ describe('Suppliers, advances, and debt payments (e2e)', () => {
       }
     });
 
-    it('OWNER/ACCOUNTANT can read but not create suppliers', async () => {
+    it('ACCOUNTANT can read but not create suppliers', async () => {
       const project = await createTestProject(
         prisma.client,
         `Owner Supplier Test ${randomUUID()}`,
       );
-      const owner = await createTestUser(prisma.client, { role: Role.OWNER });
+      const owner = await createTestUser(prisma.client, {
+        role: Role.ACCOUNTANT,
+      });
       try {
         const token = await loginTestUser(app.getHttpServer(), owner.email);
         await request(app.getHttpServer())
@@ -200,7 +202,12 @@ describe('Suppliers, advances, and debt payments (e2e)', () => {
         const cleared = await request(app.getHttpServer())
           .patch(`/projects/${project.id}/suppliers/${created.body.id}`)
           .set('Authorization', `Bearer ${token}`)
-          .send({ contactPerson: null, phone: null, taxId: null, comment: null })
+          .send({
+            contactPerson: null,
+            phone: null,
+            taxId: null,
+            comment: null,
+          })
           .expect(200);
         expect(cleared.body.contactPerson).toBeNull();
         expect(cleared.body.phone).toBeNull();

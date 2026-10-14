@@ -133,12 +133,14 @@ describe('Currency rates (e2e)', () => {
     }
   });
 
-  it('OWNER can list but not create currency rates', async () => {
+  it('ACCOUNTANT can list but not create currency rates', async () => {
     const project = await createTestProject(
       prisma.client,
       `Owner Rate Test ${randomUUID()}`,
     );
-    const owner = await createTestUser(prisma.client, { role: Role.OWNER });
+    const owner = await createTestUser(prisma.client, {
+      role: Role.ACCOUNTANT,
+    });
     try {
       const token = await loginTestUser(app.getHttpServer(), owner.email);
       await request(app.getHttpServer())

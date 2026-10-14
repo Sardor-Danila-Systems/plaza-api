@@ -595,31 +595,6 @@ describe('Finances (e2e)', () => {
       }
     });
 
-    it('OWNER cannot post a financial transaction', async () => {
-      const project = await createTestProject(
-        prisma.client,
-        `Owner Test ${randomUUID()}`,
-      );
-      const owner = await createTestUser(prisma.client, { role: Role.OWNER });
-      try {
-        const token = await loginTestUser(app.getHttpServer(), owner.email);
-        await request(app.getHttpServer())
-          .post(`/projects/${project.id}/finances`)
-          .set('Authorization', `Bearer ${token}`)
-          .set('Idempotency-Key', idem())
-          .send({
-            type: 'INCOME',
-            amount: '1.00',
-            currency: 'UZS',
-            occurredAt: '2026-09-14',
-          })
-          .expect(403);
-      } finally {
-        await deleteTestUser(prisma.client, owner.id);
-        await deleteTestProject(prisma.client, project.id);
-      }
-    });
-
     it('ACCOUNTANT cannot post a financial transaction', async () => {
       const project = await createTestProject(
         prisma.client,

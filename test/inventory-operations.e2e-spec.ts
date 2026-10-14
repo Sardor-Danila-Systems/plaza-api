@@ -785,15 +785,14 @@ describe('Phase 8 inventory operations (e2e)', () => {
     }
   });
 
-  it('OWNER and ACCOUNTANT can read but cannot mutate, and foreign managers cannot access', async () => {
+  it('ACCOUNTANT can read but cannot mutate, and foreign managers cannot access', async () => {
     const domain = await setupDomain();
-    const owner = await createTestUser(prisma.client, { role: Role.OWNER });
     const accountant = await createTestUser(prisma.client, {
       role: Role.ACCOUNTANT,
     });
     const foreignDomain = await setupDomain();
     try {
-      for (const reader of [owner, accountant]) {
+      for (const reader of [accountant]) {
         const token = await loginTestUser(app.getHttpServer(), reader.email);
         await request(app.getHttpServer())
           .get(`/projects/${domain.project.id}/inventory/write-offs`)
@@ -827,7 +826,6 @@ describe('Phase 8 inventory operations (e2e)', () => {
         .set('Authorization', `Bearer ${foreignDomain.token}`)
         .expect(403);
     } finally {
-      await deleteTestUser(prisma.client, owner.id);
       await deleteTestUser(prisma.client, accountant.id);
       await deleteTestProject(prisma.client, domain.project.id);
       await deleteTestProject(prisma.client, foreignDomain.project.id);
