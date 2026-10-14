@@ -22,7 +22,7 @@
  *   npm run provision -- set-role --user someone@example.com --role PROJECT_MANAGER --project avenue-plaza
  *   npm run provision -- rename-project --project avenue-plaza --name "Avenue Plaza (renamed)"
  *   CREATE_USER_PASSWORD='...' npm run provision -- create-user --role OWNER --email owner@example.com --name "Jane Doe"
- *   CREATE_USER_PASSWORD='...' npm run provision -- create-user --role CASHIER --email cashier@example.com --name "Cashier" --project avenue-plaza
+ *   CREATE_USER_PASSWORD='...' npm run provision -- create-user --role DEVELOPER --email dev@example.com --name "Developer"
  *   npm run provision -- --help
  *
  * Project/user may be identified by UUID or by code/email respectively.
@@ -51,19 +51,17 @@ Commands:
 
   assign-manager --project <code|uuid> --user <email|uuid>
 
-  set-role --user <email|uuid> --role <OWNER|ACCOUNTANT|PROJECT_MANAGER|CASHIER|DEVELOPER> [--project <code|uuid>]
-      --project is required (and only allowed) when --role is PROJECT_MANAGER
-      or CASHIER.
+  set-role --user <email|uuid> --role <OWNER|ACCOUNTANT|PROJECT_MANAGER|DEVELOPER> [--project <code|uuid>]
+      --project is required (and only allowed) when --role is
+      PROJECT_MANAGER. (CASHIER is retired and rejected.)
 
   rename-project --project <code|uuid> --name <name>
 
-  create-user --role <OWNER|ACCOUNTANT|PROJECT_MANAGER|CASHIER|DEVELOPER> --email <email> --name <display name> [--project <code|uuid>]
+  create-user --role <OWNER|ACCOUNTANT|PROJECT_MANAGER|DEVELOPER> --email <email> --name <display name> [--project <code|uuid>]
       Creates a new account. --project is required (and only allowed) when
-      --role is PROJECT_MANAGER or CASHIER. A new PROJECT_MANAGER displaces
-      any current active manager of that project, exactly like
-      assign-manager; a project may have any number of CASHIERs, who see
-      and post only the cash ledger (Касса). OWNER is read-only on every
-      project; DEVELOPER reads and writes every project.
+      --role is PROJECT_MANAGER. A new PROJECT_MANAGER displaces any current
+      active manager of that project, exactly like assign-manager. OWNER and
+      ACCOUNTANT read every project; DEVELOPER reads and writes every project.
 
       The password is read ONLY from the CREATE_USER_PASSWORD environment
       variable — never pass it as a --flag, which would leak into shell
@@ -76,10 +74,6 @@ Commands:
 
         CREATE_USER_PASSWORD='...' npm run provision -- create-user \\
           --role PROJECT_MANAGER --email pm@example.com --name "PM Name" \\
-          --project avenue-plaza
-
-        CREATE_USER_PASSWORD='...' npm run provision -- create-user \\
-          --role CASHIER --email kassa@example.com --name "Кассир" \\
           --project avenue-plaza
 
   --help, help          Show this message.
@@ -216,8 +210,7 @@ async function main(): Promise<void> {
           );
         }
 
-        const projectScoped =
-          role === Role.PROJECT_MANAGER || role === Role.CASHIER;
+        const projectScoped = role === Role.PROJECT_MANAGER;
         if (!projectScoped && args.project) {
           throw new Error(
             `--project must not be supplied when --role is ${role}`,

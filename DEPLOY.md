@@ -226,33 +226,45 @@ npm run provision -- --help
 
 Пароли пользователь меняет сам в разделе «Профиль».
 
-### Роли и аккаунты правок Evro Plaza (октябрь 2026)
+### Роли Evro Plaza (октябрь 2026)
 
-Миграция `20261014100000_developer_role` добавляет роль `DEVELOPER`
-(полный доступ на чтение и запись во всех проектах). Она применяется
-обычным `prisma migrate deploy`; данные не меняются.
+| Роль | Доступ |
+| --- | --- |
+| `PROJECT_MANAGER` | полный доступ на всё (чтение и запись) в своём проекте |
+| `ACCOUNTANT` | полный доступ ко всем проектам, только просмотр |
+| `OWNER` | читает всё, но в интерфейсе остаются только Главная, Касса, Поставщики, Закупки, История, Объекты |
+| `DEVELOPER` | чтение и запись во всех проектах |
+| `CASHIER` | **убрана**: создать или назначить нельзя |
 
-Что нужно выполнить на сервере после деплоя (пароли — только через
-`CREATE_USER_PASSWORD`, в репозиторий и историю shell они не попадают):
+Распределение на Neon: Одиль — `PROJECT_MANAGER`, Фирдавс — `OWNER`,
+Парвиз — `ACCOUNTANT`, Даня — `DEVELOPER`. `DATABASE_URL` в окружении
+должен указывать на Neon; пароли — только через `CREATE_USER_PASSWORD`.
 
 ```bash
-# Фирдавс и Одил: только финансы. Роль CASHIER видит одну Кассу (операции,
-# курсы валют, кассовый журнал) и свой профиль, остальные разделы закрыты.
-npm run provision -- set-role --user <email Фирдавса> --role CASHIER --project <код проекта>
-npm run provision -- set-role --user <email Одила>    --role CASHIER --project <код проекта>
+npm run build
 
-# Парвиз: полный доступ на чтение ко всем проектам.
+# Кто сейчас кассир (их надо переназначить до или вместе с остальным):
+#   SELECT email FROM "User" WHERE role = 'CASHIER';
+
+npm run provision -- set-role --user <email Одиля>    --role PROJECT_MANAGER --project <код проекта>
+npm run provision -- set-role --user <email Фирдавса> --role OWNER
+npm run provision -- set-role --user parvizaka@gmail.com --role ACCOUNTANT
+
+# если аккаунта ещё нет — create-user вместо set-role:
 CREATE_USER_PASSWORD='<пароль>' npm run provision -- create-user \
-  --role OWNER --email parvizaka@gmail.com --name "Парвиз"
+  --role ACCOUNTANT --email parvizaka@gmail.com --name "Парвиз"
 
-# Разработческий аккаунт: логин и пароль выбирает Даня.
+# Разработческий аккаунт — логин и пароль выбирает Даня:
 CREATE_USER_PASSWORD='<пароль>' npm run provision -- create-user \
   --role DEVELOPER --email <логин> --name "Разработчик"
 ```
 
-Если Фирдавс/Одил ещё не заведены — вместо `set-role` используйте
-`create-user --role CASHIER --project <код>`.
-
+Внимание: в проекте может быть только **один активный** `PROJECT_MANAGER`.
+Назначение Одиля менеджером деактивирует текущего менеджера этого проекта
+(он перестанет входить) — переназначьте его заранее, если он нужен.
+Значение `CASHIER` остаётся в enum БД (PostgreSQL не умеет его удалять);
+оставшиеся кассиры сохраняют старый доступ «только Касса», пока их не
+переназначат.
 
 ## 6. Проверка после деплоя
 

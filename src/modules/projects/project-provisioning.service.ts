@@ -18,6 +18,13 @@ import { Prisma, Project, Role, User } from '../../generated/prisma/client.js';
  * HTTP controller. See ADR 0014 for why this stays outside the authenticated
  * business API entirely, and ADR 0013 for the reassignment mechanism below.
  */
+/** The cashier role was retired in October 2026: its users become
+ * PROJECT_MANAGER, OWNER or ACCOUNTANT. The enum value stays in the database
+ * (PostgreSQL cannot drop one) and any leftover cashier keeps its old
+ * cash-only access, but no new one can be created. */
+const RETIRED_CASHIER_MESSAGE =
+  'The CASHIER role is retired — use PROJECT_MANAGER, OWNER, ACCOUNTANT or DEVELOPER';
+
 @Injectable()
 export class ProjectProvisioningService {
   constructor(
@@ -117,6 +124,9 @@ export class ProjectProvisioningService {
    * instead of a raw constraint-violation message.
    */
   async setRole(userId: string, role: Role, projectId?: string): Promise<void> {
+    if (role === Role.CASHIER) {
+      throw new BadRequestException(RETIRED_CASHIER_MESSAGE);
+    }
     if (role === Role.PROJECT_MANAGER) {
       if (!projectId) {
         throw new BadRequestException(
@@ -127,13 +137,7 @@ export class ProjectProvisioningService {
       return;
     }
 
-    if (role === Role.CASHIER) {
-      if (!projectId) {
-        throw new BadRequestException(
-          'projectId is required when role is CASHIER',
-        );
-      }
-    } else if (projectId) {
+    if (projectId) {
       throw new BadRequestException(
         `projectId must not be supplied when role is ${role}`,
       );
@@ -145,20 +149,10 @@ export class ProjectProvisioningService {
     if (!user) {
       throw new NotFoundException(`User ${userId} not found`);
     }
-    if (role === Role.CASHIER) {
-      const project = await this.prisma.client.project.findUnique({
-        where: { id: projectId },
-      });
-      if (!project) {
-        throw new NotFoundException(`Project ${projectId} not found`);
-      }
-    }
 
-    // Unlike a manager there is no "one per project" rule to preserve: a
-    // project may have any number of cashiers, so this is a plain update.
     await this.prisma.client.user.update({
       where: { id: userId },
-      data: { role, projectId: role === Role.CASHIER ? projectId! : null },
+      data: { role, projectId: null },
     });
   }
 
@@ -183,6 +177,9 @@ export class ProjectProvisioningService {
     role: Role;
     projectId?: string;
   }): Promise<Omit<User, 'passwordHash'>> {
+    if (input.role === Role.CASHIER) {
+      throw new BadRequestException(RETIRED_CASHIER_MESSAGE);
+    }
     const dto = plainToInstance(CreateUserDto, input);
     const errors = validateSync(dto, { skipMissingProperties: false });
     if (errors.length > 0) {
@@ -192,8 +189,7 @@ export class ProjectProvisioningService {
       throw new BadRequestException(`Invalid user input:\n${details}`);
     }
 
-    const projectScoped =
-      dto.role === Role.PROJECT_MANAGER || dto.role === Role.CASHIER;
+    const projectScoped = dto.role === Role.PROJECT_MANAGER;
     if (projectScoped) {
       if (!dto.projectId) {
         throw new BadRequestException(
