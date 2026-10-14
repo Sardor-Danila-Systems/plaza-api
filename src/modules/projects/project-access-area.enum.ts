@@ -12,7 +12,7 @@
 export enum ProjectAccessArea {
   /** Everything outside the cash ledger. CASHIER is denied here. */
   GENERAL = 'GENERAL',
-  /** The cash ledger: transactions, balances, transaction categories, and
+  /** The cash ledger: transactions, balances, transaction categories, currency rates, and
    * the files attached to cash transactions. */
   CASH = 'CASH',
 }

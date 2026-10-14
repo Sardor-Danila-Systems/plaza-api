@@ -226,6 +226,34 @@ npm run provision -- --help
 
 Пароли пользователь меняет сам в разделе «Профиль».
 
+### Роли и аккаунты правок Evro Plaza (октябрь 2026)
+
+Миграция `20261014100000_developer_role` добавляет роль `DEVELOPER`
+(полный доступ на чтение и запись во всех проектах). Она применяется
+обычным `prisma migrate deploy`; данные не меняются.
+
+Что нужно выполнить на сервере после деплоя (пароли — только через
+`CREATE_USER_PASSWORD`, в репозиторий и историю shell они не попадают):
+
+```bash
+# Фирдавс и Одил: только финансы. Роль CASHIER видит одну Кассу (операции,
+# курсы валют, кассовый журнал) и свой профиль, остальные разделы закрыты.
+npm run provision -- set-role --user <email Фирдавса> --role CASHIER --project <код проекта>
+npm run provision -- set-role --user <email Одила>    --role CASHIER --project <код проекта>
+
+# Парвиз: полный доступ на чтение ко всем проектам.
+CREATE_USER_PASSWORD='<пароль>' npm run provision -- create-user \
+  --role OWNER --email parvizaka@gmail.com --name "Парвиз"
+
+# Разработческий аккаунт: логин и пароль выбирает Даня.
+CREATE_USER_PASSWORD='<пароль>' npm run provision -- create-user \
+  --role DEVELOPER --email <логин> --name "Разработчик"
+```
+
+Если Фирдавс/Одил ещё не заведены — вместо `set-role` используйте
+`create-user --role CASHIER --project <код>`.
+
+
 ## 6. Проверка после деплоя
 
 ```bash

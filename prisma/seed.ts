@@ -7,7 +7,7 @@
  *
  * Usage: npm run seed
  * Override the default dev passwords: SEED_OWNER_PASSWORD=... SEED_ACCOUNTANT_PASSWORD=...
- * SEED_MANAGER_PASSWORD=... SEED_CASHIER_PASSWORD=... npm run seed
+ * SEED_MANAGER_PASSWORD=... SEED_CASHIER_PASSWORD=... SEED_DEVELOPER_PASSWORD=... npm run seed
  */
 import 'dotenv/config';
 import * as argon2 from 'argon2';
@@ -174,6 +174,14 @@ async function main(): Promise<void> {
         role: Role.CASHIER,
         passwordEnvVar: 'SEED_CASHIER_PASSWORD',
         projectId: project.id,
+      },
+      {
+        // Reads and writes every project (the support account).
+        email: 'developer@euro-plaza.example',
+        displayName: 'Seed Developer',
+        role: Role.DEVELOPER,
+        passwordEnvVar: 'SEED_DEVELOPER_PASSWORD',
+        projectId: null,
       },
     ];
 

@@ -48,6 +48,10 @@ enum Role {
   /// (see ProjectAccessArea). Project-scoped like PROJECT_MANAGER, but a
   /// project may have any number of active cashiers.
   CASHIER
+  /// The developer/support account: reads and writes every project, in every
+  /// area. Not project-scoped (projectId must be NULL, like OWNER). Created
+  /// only through the provisioning CLI, never an HTTP endpoint.
+  DEVELOPER
 }
 
 model Project {

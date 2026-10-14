@@ -17,6 +17,12 @@ import type { Response } from 'express';
 import { ErrorResponseDto } from '../../common/dto/error-response.dto.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.js';
+import {
+  CashJournalQueryDto,
+  MaterialReportQueryDto,
+  SupplierReconciliationQueryDto,
+} from './dto/form-report-queries.dto.js';
+import { FormReportsService } from './forms/form-reports.service.js';
 import { ReportPeriodQueryDto } from './dto/report-period-query.dto.js';
 import { ReportsService } from './reports.service.js';
 
@@ -28,7 +34,54 @@ const XLSX_MIME =
 @ApiProduces(XLSX_MIME)
 @Controller('projects/:projectId/reports')
 export class ReportsController {
-  constructor(private readonly reportsService: ReportsService) {}
+  constructor(
+    private readonly reportsService: ReportsService,
+    private readonly formReports: FormReportsService,
+  ) {}
+
+  @Get('supplier-reconciliation.xlsx')
+  @ApiOperation({
+    summary: 'Акт сверки взаиморасчетов with one supplier (1C layout)',
+  })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  async supplierReconciliation(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Query() query: SupplierReconciliationQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    await this.formReports.supplierReconciliation(user, projectId, query, res);
+  }
+
+  @Get('material-report.xlsx')
+  @ApiOperation({
+    summary:
+      'Материальный отчет: opening balance, receipts, issues and closing balance per material (1C layout)',
+  })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  async materialReport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Query() query: MaterialReportQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    await this.formReports.materialReport(user, projectId, query, res);
+  }
+
+  @Get('cash-journal.xlsx')
+  @ApiOperation({
+    summary:
+      'Общий кассовый журнал with running balance per currency (1C layout)',
+  })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  async cashJournal(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Query() query: CashJournalQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    await this.formReports.cashJournal(user, projectId, query, res);
+  }
 
   @Get('cash.xlsx')
   @ApiOperation({ summary: 'Cash ledger export' })

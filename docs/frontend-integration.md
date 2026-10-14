@@ -41,11 +41,23 @@ There is no global `/api/v1` prefix in the shipped backend.
 - `PROJECT_MANAGER`: can mutate only the active project assigned to the manager.
 - `CASHIER`: project-scoped like a manager, any number per project. Reads and
   writes **only the cash ledger** of their own project — `/finances*`,
-  `/transaction-categories`, `GET /projects[/:id]`, and attachments linked to
-  a financial transaction. Every other endpoint answers 403
+  `/transaction-categories`, `/currency-rates*`, `GET /projects[/:id]`,
+  `GET /reports/cash-journal.xlsx`, and attachments linked to a financial
+  transaction. Every other endpoint answers 403
   `PROJECT_ACCESS_DENIED`. Server-side this is `ProjectAccessArea`: every
   access check defaults to `GENERAL`, so a new endpoint is closed to cashiers
   until it explicitly opts in to `CASH`.
+- `DEVELOPER`: the support account. Reads and writes every project in every
+  area; not project-scoped. Created only through the provisioning CLI.
+
+### 1C-layout reports
+
+`GET /projects/:id/reports/{supplier-reconciliation|material-report|cash-journal}.xlsx`
+return the printable forms the accountants know from 1C (Акт сверки,
+Материальный отчет, Общий кассовый журнал). All take `dateFrom`/`dateTo`
+(`dateTo` exclusive, default 1 January to today); `supplier-reconciliation`
+requires `supplierId`, `material-report` takes an optional `warehouseId`,
+`cash-journal` an optional `account`. Cancelled operations are left out.
 
 ### Cash accounts
 
