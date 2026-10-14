@@ -39,7 +39,7 @@ There is no global `/api/v1` prefix in the shipped backend.
 - `OWNER`: can read across projects; cannot mutate write-offs/transfers.
 - `ACCOUNTANT`: can read project finance/inventory data; cannot mutate write-offs/transfers.
 - `PROJECT_MANAGER`: can mutate only the active project assigned to the manager.
-- `CASHIER`: project-scoped like a manager, any number per project. Reads and
+- `CASHIER` (retired Oct 2026 — cannot be created or assigned; kept only for leftover rows): project-scoped like a manager, any number per project. Reads and
   writes **only the cash ledger** of their own project — `/finances*`,
   `/transaction-categories`, `/currency-rates*`, `GET /projects[/:id]`,
   `GET /reports/cash-journal.xlsx`, and attachments linked to a financial
