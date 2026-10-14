@@ -51,18 +51,19 @@ Commands:
 
   assign-manager --project <code|uuid> --user <email|uuid>
 
-  set-role --user <email|uuid> --role <OWNER|ACCOUNTANT|PROJECT_MANAGER|CASHIER> [--project <code|uuid>]
+  set-role --user <email|uuid> --role <OWNER|ACCOUNTANT|PROJECT_MANAGER|CASHIER|DEVELOPER> [--project <code|uuid>]
       --project is required (and only allowed) when --role is PROJECT_MANAGER
       or CASHIER.
 
   rename-project --project <code|uuid> --name <name>
 
-  create-user --role <OWNER|ACCOUNTANT|PROJECT_MANAGER|CASHIER> --email <email> --name <display name> [--project <code|uuid>]
+  create-user --role <OWNER|ACCOUNTANT|PROJECT_MANAGER|CASHIER|DEVELOPER> --email <email> --name <display name> [--project <code|uuid>]
       Creates a new account. --project is required (and only allowed) when
       --role is PROJECT_MANAGER or CASHIER. A new PROJECT_MANAGER displaces
       any current active manager of that project, exactly like
       assign-manager; a project may have any number of CASHIERs, who see
-      and post only the cash ledger (Касса).
+      and post only the cash ledger (Касса). OWNER is read-only on every
+      project; DEVELOPER reads and writes every project.
 
       The password is read ONLY from the CREATE_USER_PASSWORD environment
       variable — never pass it as a --flag, which would leak into shell

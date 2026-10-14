@@ -22,6 +22,7 @@ import { ProjectAccessArea } from './project-access-area.enum.js';
  * - PROJECT_MANAGER: READ/WRITE only their own assigned (active) project.
  * - CASHIER: READ/WRITE only their own assigned project, and only in
  *   `ProjectAccessArea.CASH` — denied everywhere else (see that enum).
+ * - DEVELOPER: READ/WRITE any project, in every area.
  *
  * Authorization is checked BEFORE existence: a request for a project outside
  * the caller's authority returns 403 `PROJECT_ACCESS_DENIED` whether or not
@@ -116,6 +117,8 @@ export class ProjectAccessService {
       case Role.CASHIER:
         if (assignedProjectId !== projectId) throw this.accessDenied();
         if (area !== ProjectAccessArea.CASH) throw this.accessDenied();
+        return;
+      case Role.DEVELOPER:
         return;
       case Role.OWNER:
       case Role.ACCOUNTANT:

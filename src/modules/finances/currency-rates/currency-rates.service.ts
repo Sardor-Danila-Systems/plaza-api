@@ -4,6 +4,7 @@ import { PrismaService } from '../../../database/prisma.service.js';
 import { RateSource } from '../../../generated/prisma/client.js';
 import { AuthenticatedUser } from '../../auth/types/authenticated-user.js';
 import { ProjectAccessAction } from '../../projects/project-access-action.enum.js';
+import { ProjectAccessArea } from '../../projects/project-access-area.enum.js';
 import { ProjectAccessService } from '../../projects/project-access.service.js';
 import { CreateCurrencyRateDto } from './dto/create-currency-rate.dto.js';
 import { CurrencyRateResponseDto } from './dto/currency-rate-response.dto.js';
@@ -41,6 +42,7 @@ export class CurrencyRatesService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.CASH,
     );
     const rates = await this.prisma.client.currencyRate.findMany({
       where: { projectId },
@@ -79,6 +81,7 @@ export class CurrencyRatesService {
       user,
       projectId,
       ProjectAccessAction.WRITE,
+      ProjectAccessArea.CASH,
     );
     const rate = await this.prisma.client.currencyRate.create({
       data: {
@@ -118,10 +121,14 @@ export class CurrencyRatesService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.CASH,
     );
 
     const now = Date.now();
-    if (this.liveRateCache && now - this.liveRateCache.fetchedAt < LIVE_RATE_CACHE_TTL_MS) {
+    if (
+      this.liveRateCache &&
+      now - this.liveRateCache.fetchedAt < LIVE_RATE_CACHE_TTL_MS
+    ) {
       return {
         rateUzs: this.liveRateCache.rateUzs,
         asOf: this.liveRateCache.asOf,
@@ -158,7 +165,12 @@ export class CurrencyRatesService {
       const asOf = `${year}-${month}-${day}`;
 
       this.liveRateCache = { rateUzs: entry.Rate, asOf, fetchedAt: now };
-      return { rateUzs: entry.Rate, asOf, source: RateSource.PROVIDER, stale: false };
+      return {
+        rateUzs: entry.Rate,
+        asOf,
+        source: RateSource.PROVIDER,
+        stale: false,
+      };
     } catch {
       if (this.liveRateCache) {
         return {
