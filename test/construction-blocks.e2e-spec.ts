@@ -123,9 +123,9 @@ describe('Construction blocks (e2e)', () => {
       }
     });
 
-    it('OWNER cannot bulk-create blocks', async () => {
+    it('ACCOUNTANT cannot bulk-create blocks', async () => {
       const project = await createTestProject(prisma.client);
-      const owner = await createTestUser(prisma.client, { role: Role.OWNER });
+      const owner = await createTestUser(prisma.client, { role: Role.ACCOUNTANT });
       try {
         const token = await loginTestUser(app.getHttpServer(), owner.email);
         await request(app.getHttpServer())
@@ -157,23 +157,6 @@ describe('Construction blocks (e2e)', () => {
         });
       } finally {
         await deleteTestUser(prisma.client, manager.id);
-        await deleteTestProject(prisma.client, project.id);
-      }
-    });
-
-    it('OWNER cannot create a block', async () => {
-      const project = await createTestProject(prisma.client);
-      const owner = await createTestUser(prisma.client, { role: Role.OWNER });
-      try {
-        const token = await loginTestUser(app.getHttpServer(), owner.email);
-        const response = await request(app.getHttpServer())
-          .post(`/projects/${project.id}/construction/blocks`)
-          .set('Authorization', `Bearer ${token}`)
-          .send({ name: 'Block A', code: 'block-a' })
-          .expect(403);
-        expect(response.body.code).toBe('PROJECT_ACCESS_DENIED');
-      } finally {
-        await deleteTestUser(prisma.client, owner.id);
         await deleteTestProject(prisma.client, project.id);
       }
     });

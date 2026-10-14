@@ -36,8 +36,8 @@ There is no global `/api/v1` prefix in the shipped backend.
 
 ## Roles And Access
 
-- `OWNER`: can read across projects; cannot mutate write-offs/transfers.
-- `ACCOUNTANT`: can read project finance/inventory data; cannot mutate write-offs/transfers.
+- `OWNER`: reads and writes every project; the UI only offers Главная, Касса, Поставщики, Закупки, История and Объекты.
+- `ACCOUNTANT`: reads every project; never writes.
 - `PROJECT_MANAGER`: can mutate only the active project assigned to the manager.
 - `CASHIER` (retired Oct 2026 — cannot be created or assigned; kept only for leftover rows): project-scoped like a manager, any number per project. Reads and
   writes **only the cash ledger** of their own project — `/finances*`,

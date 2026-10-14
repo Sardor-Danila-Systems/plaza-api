@@ -151,9 +151,11 @@ describe('Construction floors (e2e)', () => {
       }
     });
 
-    it('OWNER/ACCOUNTANT cannot create floors', async () => {
+    it('ACCOUNTANT cannot create floors', async () => {
       const { project, block } = await setupProjectBlockManager();
-      const owner = await createTestUser(prisma.client, { role: Role.OWNER });
+      const owner = await createTestUser(prisma.client, {
+        role: Role.ACCOUNTANT,
+      });
       try {
         const token = await loginTestUser(app.getHttpServer(), owner.email);
         await request(app.getHttpServer())

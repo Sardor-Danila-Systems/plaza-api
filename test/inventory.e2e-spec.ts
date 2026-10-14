@@ -110,29 +110,6 @@ describe('Inventory foundation (e2e)', () => {
       }
     });
 
-    it('OWNER can read but not create warehouses', async () => {
-      const project = await createTestProject(
-        prisma.client,
-        `Owner WH Test ${randomUUID()}`,
-      );
-      const owner = await createTestUser(prisma.client, { role: Role.OWNER });
-      try {
-        const token = await loginTestUser(app.getHttpServer(), owner.email);
-        await request(app.getHttpServer())
-          .get(`/projects/${project.id}/warehouses`)
-          .set('Authorization', `Bearer ${token}`)
-          .expect(200);
-        await request(app.getHttpServer())
-          .post(`/projects/${project.id}/warehouses`)
-          .set('Authorization', `Bearer ${token}`)
-          .send({ name: 'A', code: 'a' })
-          .expect(403);
-      } finally {
-        await deleteTestUser(prisma.client, owner.id);
-        await deleteTestProject(prisma.client, project.id);
-      }
-    });
-
     it('ACCOUNTANT can read but not create warehouses', async () => {
       const project = await createTestProject(
         prisma.client,

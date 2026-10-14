@@ -178,9 +178,11 @@ describe('Attachments (e2e)', () => {
   });
 
   describe('Authorization', () => {
-    it('OWNER/ACCOUNTANT can list/read but not upload', async () => {
+    it('ACCOUNTANT can list/read but not upload', async () => {
       const { project } = await setupProjectAndManager();
-      const owner = await createTestUser(prisma.client, { role: Role.OWNER });
+      const owner = await createTestUser(prisma.client, {
+        role: Role.ACCOUNTANT,
+      });
       try {
         const ownerToken = await loginTestUser(
           app.getHttpServer(),

@@ -367,34 +367,36 @@ describe('1C-layout reports and the developer role (e2e)', () => {
     }
   });
 
-  it('gives DEVELOPER write access to any project, while OWNER stays read-only', async () => {
+  it('gives DEVELOPER and OWNER write access to any project, while ACCOUNTANT stays read-only', async () => {
     const { project } = await setup();
     try {
-      const developer = await createTestUser(prisma.client, {
-        role: Role.DEVELOPER,
-      });
-      const owner = await createTestUser(prisma.client, { role: Role.OWNER });
-      const devToken = await loginTestUser(
-        app.getHttpServer(),
-        developer.email,
-      );
-      const ownerToken = await loginTestUser(app.getHttpServer(), owner.email);
       const body = {
         type: 'INCOME',
         amount: '100.00',
         currency: 'UZS',
         occurredAt: '2026-10-01',
       };
-
-      await post(`/projects/${project.id}/finances`, devToken, body).expect(
-        201,
+      for (const role of [Role.DEVELOPER, Role.OWNER]) {
+        const user = await createTestUser(prisma.client, { role });
+        const token = await loginTestUser(app.getHttpServer(), user.email);
+        await post(`/projects/${project.id}/finances`, token, body).expect(201);
+        await post(`/projects/${project.id}/suppliers`, token, {
+          name: 'X',
+        }).expect(201);
+      }
+      const accountant = await createTestUser(prisma.client, {
+        role: Role.ACCOUNTANT,
+      });
+      const accToken = await loginTestUser(
+        app.getHttpServer(),
+        accountant.email,
       );
-      await post(`/projects/${project.id}/finances`, ownerToken, body).expect(
+      await post(`/projects/${project.id}/finances`, accToken, body).expect(
         403,
       );
       await request(app.getHttpServer())
         .get(`/projects/${project.id}/finances/balance`)
-        .set('Authorization', `Bearer ${ownerToken}`)
+        .set('Authorization', `Bearer ${accToken}`)
         .expect(200);
     } finally {
       await deleteTestProject(prisma.client, project.id);

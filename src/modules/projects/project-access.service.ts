@@ -18,7 +18,9 @@ import { ProjectAccessArea } from './project-access-area.enum.js';
  * 3 only needs to call `assertAccess` before its own business reads/writes.
  *
  * Policy:
- * - OWNER / ACCOUNTANT: READ any active project, WRITE none.
+ * - OWNER: READ and WRITE any active project (the UI narrows which sections
+ *   the owner is offered).
+ * - ACCOUNTANT: READ any active project, WRITE none.
  * - PROJECT_MANAGER: READ/WRITE only their own assigned (active) project.
  * - CASHIER: READ/WRITE only their own assigned project, and only in
  *   `ProjectAccessArea.CASH` — denied everywhere else (see that enum).
@@ -119,8 +121,8 @@ export class ProjectAccessService {
         if (area !== ProjectAccessArea.CASH) throw this.accessDenied();
         return;
       case Role.DEVELOPER:
-        return;
       case Role.OWNER:
+        return;
       case Role.ACCOUNTANT:
         // Read anything, write nothing, regardless of which project.
         if (action === ProjectAccessAction.WRITE) throw this.accessDenied();
