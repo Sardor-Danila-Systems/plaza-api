@@ -28,9 +28,20 @@ describe('Health (e2e)', () => {
     await app.close();
   });
 
-  it('GET /health returns 200 with the exact documented shape when the database is up', async () => {
+  it('GET /health is liveness only: 200 without any database field', async () => {
     const response = await request(app.getHttpServer())
       .get('/health')
+      .expect(200);
+
+    expect(response.body).toEqual({
+      status: 'ok',
+      timestamp: expect.any(String),
+    });
+  });
+
+  it('GET /health/db returns 200 with the exact documented shape when the database is up', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/health/db')
       .expect(200);
 
     expect(response.body).toEqual({

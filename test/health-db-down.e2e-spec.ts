@@ -47,9 +47,13 @@ describe('Health (e2e) — database unavailable', () => {
     expect(app).toBeDefined();
   });
 
-  it('GET /health returns 503 with a safe, generic message', async () => {
+  it('GET /health still answers 200: liveness never depends on the database', async () => {
+    await request(app.getHttpServer()).get('/health').expect(200);
+  });
+
+  it('GET /health/db returns 503 with a safe, generic message', async () => {
     const response = await request(app.getHttpServer())
-      .get('/health')
+      .get('/health/db')
       .expect(503);
 
     expect(response.body).toEqual({
@@ -57,14 +61,14 @@ describe('Health (e2e) — database unavailable', () => {
       error: 'Service Unavailable',
       code: 'DATABASE_UNAVAILABLE',
       message: 'Database connection failed',
-      path: '/health',
+      path: '/health/db',
       timestamp: expect.any(String),
       requestId: expect.any(String),
     });
   });
 
   it('never leaks the connection string or driver error details', async () => {
-    const response = await request(app.getHttpServer()).get('/health');
+    const response = await request(app.getHttpServer()).get('/health/db');
     expect(JSON.stringify(response.body)).not.toMatch(
       /127\.0\.0\.1|unreachable|ECONNREFUSED/,
     );

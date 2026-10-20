@@ -15,10 +15,29 @@ import { HealthResponseDto } from './dto/health-response.dto.js';
 export class HealthController {
   constructor(private readonly prisma: PrismaService) {}
 
-  // Infra/monitoring probe — must stay reachable without a valid session
+  // Infra/monitoring probes — must stay reachable without a valid session
   // (there usually isn't one), unlike every business route added from here on.
+
+  /**
+   * Liveness only: answers without touching the database. A hosting health
+   * check polls this every few seconds, and a query per poll would keep a
+   * scale-to-zero database (Neon) awake around the clock — that is exactly
+   * what ran the compute up to 24/7. Point the platform's health check here.
+   */
   @Public()
   @Get()
+  @ApiOperation({
+    summary: 'Liveness check (no authentication, never queries the database)',
+  })
+  @ApiOkResponse({ type: HealthResponseDto })
+  live(): HealthResponseDto {
+    return { status: 'ok', timestamp: new Date().toISOString() };
+  }
+
+  /** Liveness plus database connectivity. Run it by hand after a deploy;
+   * do not poll it on a schedule (see `live`). */
+  @Public()
+  @Get('db')
   @ApiOperation({
     summary:
       'Liveness and database connectivity check (no authentication required)',
@@ -28,7 +47,7 @@ export class HealthController {
     description: 'Database is unreachable',
     type: ErrorResponseDto,
   })
-  async check(): Promise<HealthResponseDto> {
+  async checkDatabase(): Promise<HealthResponseDto> {
     try {
       await this.prisma.client.$queryRaw`SELECT 1`;
     } catch {
