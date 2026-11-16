@@ -11,6 +11,7 @@ import {
 } from '../../generated/prisma/client.js';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.js';
 import { ProjectAccessAction } from '../projects/project-access-action.enum.js';
+import { ProjectAccessArea } from '../projects/project-access-area.enum.js';
 import { ProjectAccessService } from '../projects/project-access.service.js';
 import {
   AnalyticsSummaryResponseDto,
@@ -69,6 +70,7 @@ export class AnalyticsService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.FINANCE,
     );
     const from = toDate(query.dateFrom);
     const to = toDate(query.dateTo);
@@ -151,6 +153,7 @@ export class AnalyticsService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.INVENTORY,
     );
     const from = toDate(query.dateFrom);
     const to = toDate(query.dateTo);
@@ -258,6 +261,7 @@ export class AnalyticsService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.INVENTORY,
     );
 
     if (query.floorId && query.wholeBlockOnly) {

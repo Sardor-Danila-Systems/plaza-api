@@ -4,6 +4,7 @@ import { Prisma, Unit } from '../../../generated/prisma/client.js';
 import { AuditService } from '../../audit/audit.service.js';
 import { AuthenticatedUser } from '../../auth/types/authenticated-user.js';
 import { ProjectAccessAction } from '../../projects/project-access-action.enum.js';
+import { ProjectAccessArea } from '../../projects/project-access-area.enum.js';
 import { ProjectAccessService } from '../../projects/project-access.service.js';
 import { CreateUnitDto } from './dto/create-unit.dto.js';
 import { UnitResponseDto } from './dto/unit-response.dto.js';
@@ -31,6 +32,7 @@ export class UnitsService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.INVENTORY,
     );
     const units = await this.prisma.client.unit.findMany({
       where: { projectId },
@@ -49,6 +51,7 @@ export class UnitsService {
       user,
       projectId,
       ProjectAccessAction.WRITE,
+      ProjectAccessArea.INVENTORY,
     );
 
     let unit: Unit;

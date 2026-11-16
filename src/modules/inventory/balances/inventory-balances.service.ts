@@ -5,6 +5,7 @@ import { PrismaService } from '../../../database/prisma.service.js';
 import { Prisma } from '../../../generated/prisma/client.js';
 import { AuthenticatedUser } from '../../auth/types/authenticated-user.js';
 import { ProjectAccessAction } from '../../projects/project-access-action.enum.js';
+import { ProjectAccessArea } from '../../projects/project-access-area.enum.js';
 import { ProjectAccessService } from '../../projects/project-access.service.js';
 import { InventoryBalanceResponseDto } from './dto/inventory-balance-response.dto.js';
 import { ListInventoryQueryDto } from './dto/list-inventory-query.dto.js';
@@ -36,6 +37,7 @@ export class InventoryBalancesService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.INVENTORY,
     );
 
     const where: Prisma.InventoryBalanceWhereInput = { projectId };

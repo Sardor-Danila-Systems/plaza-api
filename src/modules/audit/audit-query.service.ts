@@ -3,6 +3,7 @@ import { PrismaService } from '../../database/prisma.service.js';
 import { AuditLog, Prisma } from '../../generated/prisma/client.js';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.js';
 import { ProjectAccessAction } from '../projects/project-access-action.enum.js';
+import { ProjectAccessArea } from '../projects/project-access-area.enum.js';
 import { ProjectAccessService } from '../projects/project-access.service.js';
 import { AuditLogResponseDto } from './dto/audit-log-response.dto.js';
 import { ListAuditQueryDto } from './dto/list-audit-query.dto.js';
@@ -31,6 +32,7 @@ export class AuditQueryService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.FINANCE,
     );
 
     const where: Prisma.AuditLogWhereInput = { projectId };
@@ -86,6 +88,7 @@ export class AuditQueryService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.FINANCE,
     );
     const row = await this.prisma.client.auditLog.findFirst({
       where: { id: auditLogId, projectId },

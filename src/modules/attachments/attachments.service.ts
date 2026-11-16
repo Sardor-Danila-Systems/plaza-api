@@ -224,13 +224,14 @@ export class AttachmentsService {
     projectId: string,
     query: ListAttachmentsQueryDto,
   ): Promise<PaginatedAttachmentsResponseDto> {
-    // Unfiltered listing spans every target, so it is GENERAL; a cashier
-    // can only ever list the files of one cash transaction.
+    // Unfiltered listing spans every target, so it is FINANCE (every
+    // non-cash target is a money record); a cashier can only ever list the
+    // files of one cash transaction.
     await this.projectAccess.assertAccess(
       user,
       projectId,
       ProjectAccessAction.READ,
-      query.target ? areaForTarget(query.target) : ProjectAccessArea.GENERAL,
+      query.target ? areaForTarget(query.target) : ProjectAccessArea.FINANCE,
     );
 
     if (
@@ -405,7 +406,7 @@ export class AttachmentsService {
     const area = attachment.financialTransactionId
       ? ProjectAccessArea.CASH
       : attachment.purchaseId || attachment.supplierPaymentId
-        ? ProjectAccessArea.GENERAL
+        ? ProjectAccessArea.FINANCE
         : // Unlinked: only its staging flow ever reads it — see `upload`.
           ProjectAccessArea.CASH;
     if (area !== ProjectAccessArea.CASH) {
@@ -539,9 +540,9 @@ export class AttachmentsService {
 }
 
 /** Cash-transaction files are part of the cash ledger; purchase and
- * supplier-payment files are not. */
+ * supplier-payment files belong to FINANCE. */
 function areaForTarget(target: AttachmentTarget): ProjectAccessArea {
   return target === AttachmentTarget.FINANCIAL_TRANSACTION
     ? ProjectAccessArea.CASH
-    : ProjectAccessArea.GENERAL;
+    : ProjectAccessArea.FINANCE;
 }

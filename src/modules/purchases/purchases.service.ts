@@ -37,6 +37,7 @@ import { AuthenticatedUser } from '../auth/types/authenticated-user.js';
 import { EditCommentDto } from '../finances/dto/edit-comment.dto.js';
 import { FinancialPostingService } from '../finances/financial-posting.service.js';
 import { ProjectAccessAction } from '../projects/project-access-action.enum.js';
+import { ProjectAccessArea } from '../projects/project-access-area.enum.js';
 import { ProjectAccessService } from '../projects/project-access.service.js';
 import { CancelPurchaseDto } from './dto/cancel-purchase.dto.js';
 import { CreatePurchaseDto } from './dto/create-purchase.dto.js';
@@ -124,6 +125,7 @@ export class PurchasesService {
           user.id,
           projectId,
           ProjectAccessAction.WRITE,
+          ProjectAccessArea.FINANCE,
         );
 
         const existingOperation = await tx.postedOperation.findUnique({
@@ -672,6 +674,7 @@ export class PurchasesService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.FINANCE,
     );
 
     const where: Prisma.PurchaseWhereInput = { projectId };
@@ -724,6 +727,7 @@ export class PurchasesService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.FINANCE,
     );
     const purchase = await this.getPurchaseOrThrow(projectId, purchaseId);
     return this.toResponse(this.prisma.client, purchase);
@@ -743,6 +747,7 @@ export class PurchasesService {
       user,
       projectId,
       ProjectAccessAction.WRITE,
+      ProjectAccessArea.FINANCE,
     );
     const existing = await this.getPurchaseOrThrow(projectId, purchaseId);
 
@@ -804,6 +809,7 @@ export class PurchasesService {
           user.id,
           projectId,
           ProjectAccessAction.WRITE,
+          ProjectAccessArea.FINANCE,
         );
 
         const existingOperation = await tx.postedOperation.findUnique({

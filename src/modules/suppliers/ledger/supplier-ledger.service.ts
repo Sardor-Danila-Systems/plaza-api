@@ -8,6 +8,7 @@ import {
 } from '../../../generated/prisma/client.js';
 import { AuthenticatedUser } from '../../auth/types/authenticated-user.js';
 import { ProjectAccessAction } from '../../projects/project-access-action.enum.js';
+import { ProjectAccessArea } from '../../projects/project-access-area.enum.js';
 import { ProjectAccessService } from '../../projects/project-access.service.js';
 import { SupplierLedgerResponseDto } from './dto/supplier-ledger-response.dto.js';
 
@@ -27,6 +28,7 @@ export class SupplierLedgerService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.FINANCE,
     );
 
     const supplier = await this.prisma.client.supplier.findFirst({

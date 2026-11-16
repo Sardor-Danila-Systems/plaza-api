@@ -8,6 +8,7 @@ import { Prisma, Warehouse } from '../../../generated/prisma/client.js';
 import { AuditService } from '../../audit/audit.service.js';
 import { AuthenticatedUser } from '../../auth/types/authenticated-user.js';
 import { ProjectAccessAction } from '../../projects/project-access-action.enum.js';
+import { ProjectAccessArea } from '../../projects/project-access-area.enum.js';
 import { ProjectAccessService } from '../../projects/project-access.service.js';
 import { CreateWarehouseDto } from './dto/create-warehouse.dto.js';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto.js';
@@ -36,6 +37,7 @@ export class WarehousesService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.INVENTORY,
     );
     const warehouses = await this.prisma.client.warehouse.findMany({
       where: { projectId },
@@ -53,6 +55,7 @@ export class WarehousesService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.INVENTORY,
     );
     const warehouse = await this.getWarehouseOrThrow(projectId, warehouseId);
     return this.toResponse(warehouse);
@@ -68,6 +71,7 @@ export class WarehousesService {
       user,
       projectId,
       ProjectAccessAction.WRITE,
+      ProjectAccessArea.INVENTORY,
     );
 
     let warehouse: Warehouse;
@@ -119,6 +123,7 @@ export class WarehousesService {
       user,
       projectId,
       ProjectAccessAction.WRITE,
+      ProjectAccessArea.INVENTORY,
     );
     const existing = await this.getWarehouseOrThrow(projectId, warehouseId);
 

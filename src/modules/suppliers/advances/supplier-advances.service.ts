@@ -17,6 +17,7 @@ import { AuditService } from '../../audit/audit.service.js';
 import { AuthenticatedUser } from '../../auth/types/authenticated-user.js';
 import { FinancialPostingService } from '../../finances/financial-posting.service.js';
 import { ProjectAccessAction } from '../../projects/project-access-action.enum.js';
+import { ProjectAccessArea } from '../../projects/project-access-area.enum.js';
 import { ProjectAccessService } from '../../projects/project-access.service.js';
 import { CreateSupplierAdvanceDto } from './dto/create-supplier-advance.dto.js';
 import { SupplierAdvanceResponseDto } from './dto/supplier-advance-response.dto.js';
@@ -48,6 +49,7 @@ export class SupplierAdvancesService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.FINANCE,
     );
     const supplier = await this.prisma.client.supplier.findFirst({
       where: { id: supplierId, projectId },
@@ -104,6 +106,7 @@ export class SupplierAdvancesService {
           user.id,
           projectId,
           ProjectAccessAction.WRITE,
+          ProjectAccessArea.FINANCE,
         );
 
         const existingOperation = await tx.postedOperation.findUnique({

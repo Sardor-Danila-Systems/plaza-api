@@ -149,6 +149,7 @@ export class FormReportsService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.FINANCE,
     );
     const supplier = await this.prisma.client.supplier.findFirst({
       where: { id: query.supplierId, projectId },
@@ -406,6 +407,7 @@ export class FormReportsService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.INVENTORY,
     );
     const { from, toExclusive, lastDay } = resolvePeriod(query);
 

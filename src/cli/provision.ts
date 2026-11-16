@@ -23,6 +23,7 @@
  *   npm run provision -- rename-project --project avenue-plaza --name "Avenue Plaza (renamed)"
  *   CREATE_USER_PASSWORD='...' npm run provision -- create-user --role OWNER --email owner@example.com --name "Jane Doe"
  *   CREATE_USER_PASSWORD='...' npm run provision -- create-user --role DEVELOPER --email dev@example.com --name "Developer"
+ *   CREATE_USER_PASSWORD='...' npm run provision -- create-user --role WAREHOUSE --email sklad@example.com --name "Кладовщик" --project avenue-plaza
  *   npm run provision -- --help
  *
  * Project/user may be identified by UUID or by code/email respectively.
@@ -33,6 +34,7 @@ import { AppModule } from '../app.module.js';
 import { PrismaService } from '../database/prisma.service.js';
 import { Role } from '../generated/prisma/client.js';
 import { ProjectProvisioningService } from '../modules/projects/project-provisioning.service.js';
+import { PROJECT_SCOPED_ROLES } from '../modules/projects/projects.service.js';
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -51,15 +53,15 @@ Commands:
 
   assign-manager --project <code|uuid> --user <email|uuid>
 
-  set-role --user <email|uuid> --role <OWNER|ACCOUNTANT|PROJECT_MANAGER|DEVELOPER> [--project <code|uuid>]
+  set-role --user <email|uuid> --role <OWNER|ACCOUNTANT|PROJECT_MANAGER|DEVELOPER|FINANCE|WAREHOUSE> [--project <code|uuid>]
       --project is required (and only allowed) when --role is
-      PROJECT_MANAGER. (CASHIER is retired and rejected.)
+      PROJECT_MANAGER, FINANCE or WAREHOUSE. (CASHIER is retired and rejected.)
 
   rename-project --project <code|uuid> --name <name>
 
-  create-user --role <OWNER|ACCOUNTANT|PROJECT_MANAGER|DEVELOPER> --email <email> --name <display name> [--project <code|uuid>]
+  create-user --role <OWNER|ACCOUNTANT|PROJECT_MANAGER|DEVELOPER|FINANCE|WAREHOUSE> --email <email> --name <display name> [--project <code|uuid>]
       Creates a new account. --project is required (and only allowed) when
-      --role is PROJECT_MANAGER. A new PROJECT_MANAGER displaces any current
+      --role is PROJECT_MANAGER, FINANCE (бухгалтер) or WAREHOUSE (кладовщик). A new PROJECT_MANAGER displaces any current
       active manager of that project, exactly like assign-manager. OWNER and
       ACCOUNTANT read every project; DEVELOPER reads and writes every project.
 
@@ -210,7 +212,7 @@ async function main(): Promise<void> {
           );
         }
 
-        const projectScoped = role === Role.PROJECT_MANAGER;
+        const projectScoped = PROJECT_SCOPED_ROLES.includes(role);
         if (!projectScoped && args.project) {
           throw new Error(
             `--project must not be supplied when --role is ${role}`,

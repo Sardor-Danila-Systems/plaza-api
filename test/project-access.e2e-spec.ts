@@ -7,6 +7,7 @@ import { PrismaService } from '../src/database/prisma.service.js';
 import { Role } from '../src/generated/prisma/client.js';
 import { AuthenticatedUser } from '../src/modules/auth/types/authenticated-user.js';
 import { ProjectAccessAction } from '../src/modules/projects/project-access-action.enum.js';
+import { ProjectAccessArea } from '../src/modules/projects/project-access-area.enum.js';
 import { ProjectAccessService } from '../src/modules/projects/project-access.service.js';
 import {
   createTestProject,
@@ -146,6 +147,60 @@ describe('ProjectAccessService (e2e)', () => {
         .assertAccess(manager, randomUUID(), ProjectAccessAction.READ)
         .catch((error: ForbiddenException) => error);
       expect(response).toBeInstanceOf(ForbiddenException);
+    });
+  });
+
+  describe('FINANCE (бухгалтер) / WAREHOUSE (кладовщик)', () => {
+    const { READ, WRITE } = ProjectAccessAction;
+    const { PROJECT, GENERAL, CASH, FINANCE, INVENTORY } = ProjectAccessArea;
+
+    async function allowed(
+      who: AuthenticatedUser,
+      projectId: string,
+      action: ProjectAccessAction,
+      area: ProjectAccessArea,
+    ): Promise<boolean> {
+      try {
+        await service.assertAccess(who, projectId, action, area);
+        return true;
+      } catch (error) {
+        expect(error).toBeInstanceOf(ForbiddenException);
+        return false;
+      }
+    }
+
+    it('lets FINANCE read every area of its project but write only money', async () => {
+      const finance = user({ role: Role.FINANCE, projectId: project.id });
+      for (const area of [PROJECT, GENERAL, CASH, FINANCE, INVENTORY]) {
+        expect(await allowed(finance, project.id, READ, area)).toBe(true);
+      }
+      expect(await allowed(finance, project.id, WRITE, CASH)).toBe(true);
+      expect(await allowed(finance, project.id, WRITE, FINANCE)).toBe(true);
+      expect(await allowed(finance, project.id, WRITE, INVENTORY)).toBe(false);
+      expect(await allowed(finance, project.id, WRITE, GENERAL)).toBe(false);
+    });
+
+    it('lets WAREHOUSE work the warehouse and never see money', async () => {
+      const warehouse = user({ role: Role.WAREHOUSE, projectId: project.id });
+      expect(await allowed(warehouse, project.id, READ, PROJECT)).toBe(true);
+      expect(await allowed(warehouse, project.id, READ, GENERAL)).toBe(true);
+      expect(await allowed(warehouse, project.id, READ, INVENTORY)).toBe(true);
+      expect(await allowed(warehouse, project.id, WRITE, INVENTORY)).toBe(true);
+      expect(await allowed(warehouse, project.id, READ, CASH)).toBe(false);
+      expect(await allowed(warehouse, project.id, READ, FINANCE)).toBe(false);
+      expect(await allowed(warehouse, project.id, WRITE, GENERAL)).toBe(false);
+    });
+
+    it('confines both to their own project', async () => {
+      for (const role of [Role.FINANCE, Role.WAREHOUSE]) {
+        const scoped = user({ role, projectId: project.id });
+        expect(await allowed(scoped, otherProject.id, READ, PROJECT)).toBe(
+          false,
+        );
+        expect(await allowed(scoped, otherProject.id, READ, INVENTORY)).toBe(
+          false,
+        );
+      }
     });
   });
 

@@ -15,6 +15,15 @@ const ACTIVE_MANAGER_FILTER = {
   isActive: true,
 } as const;
 
+/** Roles bound to exactly one project (`User.projectId` is required for
+ * them — see the User_role_projectId_check constraint). */
+export const PROJECT_SCOPED_ROLES: readonly Role[] = [
+  Role.PROJECT_MANAGER,
+  Role.CASHIER,
+  Role.FINANCE,
+  Role.WAREHOUSE,
+];
+
 @Injectable()
 export class ProjectsService {
   constructor(
@@ -30,12 +39,11 @@ export class ProjectsService {
    * degrades safely either way).
    */
   async listForUser(user: AuthenticatedUser): Promise<ProjectResponseDto[]> {
-    // Project-scoped roles (a manager, a cashier) only ever see the one
-    // project they are assigned to.
-    const where =
-      user.role === Role.PROJECT_MANAGER || user.role === Role.CASHIER
-        ? { id: user.projectId ?? '', isActive: true }
-        : { isActive: true };
+    // Project-scoped roles (a manager, a бухгалтер, a кладовщик) only ever
+    // see the one project they are assigned to.
+    const where = PROJECT_SCOPED_ROLES.includes(user.role)
+      ? { id: user.projectId ?? '', isActive: true }
+      : { isActive: true };
 
     const projects = await this.prisma.client.project.findMany({
       where,
@@ -52,13 +60,13 @@ export class ProjectsService {
     user: AuthenticatedUser,
     projectId: string,
   ): Promise<ProjectResponseDto> {
-    // The project's own name/code is what every screen is titled with, a
-    // cashier's included — reading it is part of the CASH area.
+    // The project's own name/code is what every screen is titled with, so
+    // every role assigned to the project may read it.
     await this.projectAccess.assertAccess(
       user,
       projectId,
       ProjectAccessAction.READ,
-      ProjectAccessArea.CASH,
+      ProjectAccessArea.PROJECT,
     );
 
     // assertAccess already proved this project exists and is authorized for

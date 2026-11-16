@@ -7,6 +7,7 @@ import { PrismaService } from '../../database/prisma.service.js';
 import { Prisma, SettlementEffect } from '../../generated/prisma/client.js';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.js';
 import { ProjectAccessAction } from '../projects/project-access-action.enum.js';
+import { ProjectAccessArea } from '../projects/project-access-area.enum.js';
 import { ProjectAccessService } from '../projects/project-access.service.js';
 import { ReportPeriodQueryDto } from './dto/report-period-query.dto.js';
 import { CellValue, streamXlsxReport } from './xlsx-writer.util.js';
@@ -61,6 +62,7 @@ export class ReportsService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.CASH,
     );
     const occurredAt = occurredAtWindow(query);
 
@@ -124,6 +126,7 @@ export class ReportsService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.FINANCE,
     );
     const occurredAt = occurredAtWindow(query);
 
@@ -225,6 +228,7 @@ export class ReportsService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.FINANCE,
     );
 
     // Two project-wide grouped aggregates (never per-supplier round trips —
@@ -341,6 +345,7 @@ export class ReportsService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.FINANCE,
     );
 
     async function* rows(this: void, client: PrismaService['client']) {
@@ -404,6 +409,7 @@ export class ReportsService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.FINANCE,
     );
 
     const rows = paginate(async (skip, take) => {
@@ -471,6 +477,7 @@ export class ReportsService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.INVENTORY,
     );
 
     const rows = paginate(async (skip, take) => {
@@ -539,6 +546,7 @@ export class ReportsService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.INVENTORY,
     );
     const occurredAt = occurredAtWindow(query);
 
@@ -596,6 +604,7 @@ export class ReportsService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.INVENTORY,
     );
     const occurredAt = occurredAtWindow(query);
 
