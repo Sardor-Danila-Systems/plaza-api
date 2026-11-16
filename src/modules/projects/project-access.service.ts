@@ -25,11 +25,11 @@ import { ProjectAccessArea } from './project-access-area.enum.js';
  * - CASHIER: READ/WRITE only their own assigned project, and only in
  *   `ProjectAccessArea.CASH` — denied everywhere else (see that enum).
  * - DEVELOPER: READ/WRITE any project, in every area.
- * - FINANCE (бухгалтер): READ everything in their own assigned project;
- *   WRITE only in `CASH` and `FINANCE`.
- * - WAREHOUSE (кладовщик): only their own assigned project; READ in
- *   `PROJECT`, `GENERAL` and `INVENTORY`, WRITE only in `INVENTORY`. Never
- *   sees `CASH` or `FINANCE`.
+ * - FINANCE (бухгалтер): READ everything in their own assigned project,
+ *   WRITE nothing.
+ * - WAREHOUSE (кладовщик): READ everything in their own assigned project;
+ *   WRITE everywhere except `CASH` (income/expense/salary entries). Supplier
+ *   payments are `FINANCE`, so they may pay suppliers.
  *
  * Authorization is checked BEFORE existence: a request for a project outside
  * the caller's authority returns 403 `PROJECT_ACCESS_DENIED` whether or not
@@ -131,28 +131,22 @@ export class ProjectAccessService {
         }
         return;
       case Role.FINANCE:
+        // Бухгалтер: sees the whole project, changes nothing.
+        if (assignedProjectId !== projectId) throw this.accessDenied();
+        if (action === ProjectAccessAction.WRITE) throw this.accessDenied();
+        return;
+      case Role.WAREHOUSE:
+        // Кладовщик/снабженец: sees the whole project and runs everything
+        // except the cash ledger itself — the warehouse, suppliers, their
+        // payments, purchases, construction objects.
         if (assignedProjectId !== projectId) throw this.accessDenied();
         if (
           action === ProjectAccessAction.WRITE &&
-          area !== ProjectAccessArea.CASH &&
-          area !== ProjectAccessArea.FINANCE
+          area === ProjectAccessArea.CASH
         ) {
           throw this.accessDenied();
         }
         return;
-      case Role.WAREHOUSE: {
-        if (assignedProjectId !== projectId) throw this.accessDenied();
-        const allowed =
-          action === ProjectAccessAction.WRITE
-            ? [ProjectAccessArea.INVENTORY]
-            : [
-                ProjectAccessArea.PROJECT,
-                ProjectAccessArea.GENERAL,
-                ProjectAccessArea.INVENTORY,
-              ];
-        if (!allowed.includes(area)) throw this.accessDenied();
-        return;
-      }
       case Role.DEVELOPER:
       case Role.OWNER:
         return;
