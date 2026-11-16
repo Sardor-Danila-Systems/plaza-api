@@ -23,6 +23,7 @@ import { AuditService } from '../../audit/audit.service.js';
 import { AuthenticatedUser } from '../../auth/types/authenticated-user.js';
 import { FinancialPostingService } from '../../finances/financial-posting.service.js';
 import { ProjectAccessAction } from '../../projects/project-access-action.enum.js';
+import { ProjectAccessArea } from '../../projects/project-access-area.enum.js';
 import { ProjectAccessService } from '../../projects/project-access.service.js';
 import { CreateDebtPaymentDto } from './dto/create-debt-payment.dto.js';
 import { SettlementAllocationResponseDto } from './dto/settlement-allocation-response.dto.js';
@@ -78,6 +79,7 @@ export class DebtPaymentsService {
           user.id,
           projectId,
           ProjectAccessAction.WRITE,
+          ProjectAccessArea.FINANCE,
         );
 
         const existingOperation = await tx.postedOperation.findUnique({

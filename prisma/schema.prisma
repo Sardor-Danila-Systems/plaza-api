@@ -52,6 +52,14 @@ enum Role {
   /// area. Not project-scoped (projectId must be NULL, like OWNER). Created
   /// only through the provisioning CLI, never an HTTP endpoint.
   DEVELOPER
+  /// Бухгалтер: one project's money — cash ledger, suppliers, purchases.
+  /// Reads the rest of that project, writes nothing in the warehouse or
+  /// construction objects. Project-scoped; any number per project.
+  FINANCE
+  /// Кладовщик: one project's warehouse — warehouses, materials, write-offs,
+  /// transfers. Never sees the cash ledger, suppliers or purchases.
+  /// Project-scoped; any number per project.
+  WAREHOUSE
 }
 
 model Project {

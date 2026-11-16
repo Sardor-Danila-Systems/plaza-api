@@ -4,6 +4,7 @@ import { Prisma, Supplier } from '../../generated/prisma/client.js';
 import { AuditService } from '../audit/audit.service.js';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.js';
 import { ProjectAccessAction } from '../projects/project-access-action.enum.js';
+import { ProjectAccessArea } from '../projects/project-access-area.enum.js';
 import { ProjectAccessService } from '../projects/project-access.service.js';
 import { CreateSupplierDto } from './dto/create-supplier.dto.js';
 import { ListSuppliersQueryDto } from './dto/list-suppliers-query.dto.js';
@@ -30,6 +31,7 @@ export class SuppliersService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.FINANCE,
     );
 
     const where: Prisma.SupplierWhereInput = { projectId };
@@ -65,6 +67,7 @@ export class SuppliersService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.FINANCE,
     );
     const supplier = await this.getSupplierOrThrow(projectId, supplierId);
     return this.toResponse(supplier);
@@ -80,6 +83,7 @@ export class SuppliersService {
       user,
       projectId,
       ProjectAccessAction.WRITE,
+      ProjectAccessArea.FINANCE,
     );
 
     const supplier = await this.prisma.client.supplier.create({
@@ -119,6 +123,7 @@ export class SuppliersService {
       user,
       projectId,
       ProjectAccessAction.WRITE,
+      ProjectAccessArea.FINANCE,
     );
     const existing = await this.getSupplierOrThrow(projectId, supplierId);
 

@@ -28,6 +28,7 @@ import {
 import { AuditService } from '../../audit/audit.service.js';
 import { AuthenticatedUser } from '../../auth/types/authenticated-user.js';
 import { ProjectAccessAction } from '../../projects/project-access-action.enum.js';
+import { ProjectAccessArea } from '../../projects/project-access-area.enum.js';
 import { ProjectAccessService } from '../../projects/project-access.service.js';
 import { CancelTransferDto } from './dto/cancel-transfer.dto.js';
 import { CreateTransferDto } from './dto/create-transfer.dto.js';
@@ -87,6 +88,7 @@ export class TransfersService {
           user.id,
           projectId,
           ProjectAccessAction.WRITE,
+          ProjectAccessArea.INVENTORY,
         );
 
         const replay = await this.findReplay(
@@ -363,6 +365,7 @@ export class TransfersService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.INVENTORY,
     );
     const where: Prisma.WarehouseTransferWhereInput = { projectId };
     if (!query.includeCancelled) {
@@ -415,6 +418,7 @@ export class TransfersService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.INVENTORY,
     );
     return this.toResponse(await this.getOrThrow(projectId, transferId));
   }
@@ -441,6 +445,7 @@ export class TransfersService {
           user.id,
           projectId,
           ProjectAccessAction.WRITE,
+          ProjectAccessArea.INVENTORY,
         );
         const replay = await this.findReplay(
           tx,

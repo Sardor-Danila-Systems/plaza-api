@@ -11,6 +11,7 @@ import { normalizeEmail } from '../auth/email-normalization.js';
 import { PasswordService } from '../auth/password.service.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
 import { Prisma, Project, Role, User } from '../../generated/prisma/client.js';
+import { PROJECT_SCOPED_ROLES } from './projects.service.js';
 
 /**
  * Project creation and manager assignment/role changes — invoked only by
@@ -137,7 +138,13 @@ export class ProjectProvisioningService {
       return;
     }
 
-    if (projectId) {
+    const projectScoped = PROJECT_SCOPED_ROLES.includes(role);
+    if (projectScoped && !projectId) {
+      throw new BadRequestException(
+        `projectId is required when role is ${role}`,
+      );
+    }
+    if (!projectScoped && projectId) {
       throw new BadRequestException(
         `projectId must not be supplied when role is ${role}`,
       );
@@ -152,7 +159,7 @@ export class ProjectProvisioningService {
 
     await this.prisma.client.user.update({
       where: { id: userId },
-      data: { role, projectId: null },
+      data: { role, projectId: projectScoped ? projectId! : null },
     });
   }
 
@@ -189,7 +196,7 @@ export class ProjectProvisioningService {
       throw new BadRequestException(`Invalid user input:\n${details}`);
     }
 
-    const projectScoped = dto.role === Role.PROJECT_MANAGER;
+    const projectScoped = PROJECT_SCOPED_ROLES.includes(dto.role);
     if (projectScoped) {
       if (!dto.projectId) {
         throw new BadRequestException(

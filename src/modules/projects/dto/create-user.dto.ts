@@ -30,7 +30,7 @@ export class CreateUserDto {
   @IsEnum(Role)
   role!: Role;
 
-  /** Required iff role is PROJECT_MANAGER or CASHIER, rejected otherwise — enforced
+  /** Required iff role is project-scoped (PROJECT_SCOPED_ROLES), rejected otherwise — enforced
    * in the service, not here, so the message can name the offending role. */
   @IsOptional()
   @IsUUID()

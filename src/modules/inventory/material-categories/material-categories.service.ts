@@ -8,6 +8,7 @@ import { MaterialCategory, Prisma } from '../../../generated/prisma/client.js';
 import { AuditService } from '../../audit/audit.service.js';
 import { AuthenticatedUser } from '../../auth/types/authenticated-user.js';
 import { ProjectAccessAction } from '../../projects/project-access-action.enum.js';
+import { ProjectAccessArea } from '../../projects/project-access-area.enum.js';
 import { ProjectAccessService } from '../../projects/project-access.service.js';
 import { CreateMaterialCategoryDto } from './dto/create-material-category.dto.js';
 import { MaterialCategoryResponseDto } from './dto/material-category-response.dto.js';
@@ -29,6 +30,7 @@ export class MaterialCategoriesService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.INVENTORY,
     );
     const categories = await this.prisma.client.materialCategory.findMany({
       where: { projectId },
@@ -47,6 +49,7 @@ export class MaterialCategoriesService {
       user,
       projectId,
       ProjectAccessAction.WRITE,
+      ProjectAccessArea.INVENTORY,
     );
 
     let category: MaterialCategory;
@@ -93,6 +96,7 @@ export class MaterialCategoriesService {
       user,
       projectId,
       ProjectAccessAction.WRITE,
+      ProjectAccessArea.INVENTORY,
     );
     const existing = await this.getCategoryOrThrow(projectId, categoryId);
 

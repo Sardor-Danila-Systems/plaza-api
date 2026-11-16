@@ -1,18 +1,28 @@
 /**
  * Which part of a project a request touches — the third axis of
  * authorization, next to role and `ProjectAccessAction`. It exists for the
- * CASHIER role: an employee who runs the cash ledger and must not see
- * suppliers, purchases, the warehouse or the construction objects.
+ * roles that own only one part of a project: the (retired) CASHIER, FINANCE
+ * (бухгалтер) and WAREHOUSE (кладовщик) — see ProjectAccessService.
  *
- * `GENERAL` is the default for every `assertAccess` call, so a CASHIER is
- * denied anywhere that has not explicitly opted in to `CASH`. A new
- * endpoint is therefore closed to cashiers until someone decides it should
- * not be — never open by omission.
+ * `GENERAL` is the default for every `assertAccess` call, and a role
+ * limited to some areas is denied anywhere it has not been granted. A new
+ * endpoint is therefore closed to those roles until someone tags it with
+ * the area it belongs to — never open by omission.
  */
 export enum ProjectAccessArea {
-  /** Everything outside the cash ledger. CASHIER is denied here. */
+  /** The project record itself (name, code) — every screen is titled with
+   * it, so every role assigned to the project may read it. */
+  PROJECT = 'PROJECT',
+  /** Construction objects and anything not tagged with a narrower area. */
   GENERAL = 'GENERAL',
   /** The cash ledger: transactions, balances, transaction categories, currency rates, and
    * the files attached to cash transactions. */
   CASH = 'CASH',
+  /** Money outside the cash ledger: suppliers, their advances, debts and
+   * payments, purchases, their files, the audit log and the financial
+   * summaries and reports. */
+  FINANCE = 'FINANCE',
+  /** The warehouse: warehouses, materials and their categories, units,
+   * stock balances, write-offs, transfers, and material reports. */
+  INVENTORY = 'INVENTORY',
 }

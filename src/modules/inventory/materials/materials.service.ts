@@ -8,6 +8,7 @@ import { Material, Prisma } from '../../../generated/prisma/client.js';
 import { AuditService } from '../../audit/audit.service.js';
 import { AuthenticatedUser } from '../../auth/types/authenticated-user.js';
 import { ProjectAccessAction } from '../../projects/project-access-action.enum.js';
+import { ProjectAccessArea } from '../../projects/project-access-area.enum.js';
 import { ProjectAccessService } from '../../projects/project-access.service.js';
 import { CreateMaterialDto } from './dto/create-material.dto.js';
 import { ListMaterialsQueryDto } from './dto/list-materials-query.dto.js';
@@ -31,6 +32,7 @@ export class MaterialsService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.INVENTORY,
     );
 
     const where: Prisma.MaterialWhereInput = { projectId };
@@ -63,6 +65,7 @@ export class MaterialsService {
       user,
       projectId,
       ProjectAccessAction.READ,
+      ProjectAccessArea.INVENTORY,
     );
     const material = await this.getMaterialOrThrow(projectId, materialId);
     return this.toResponse(material);
@@ -78,6 +81,7 @@ export class MaterialsService {
       user,
       projectId,
       ProjectAccessAction.WRITE,
+      ProjectAccessArea.INVENTORY,
     );
 
     const [category, unit] = await Promise.all([
@@ -154,6 +158,7 @@ export class MaterialsService {
       user,
       projectId,
       ProjectAccessAction.WRITE,
+      ProjectAccessArea.INVENTORY,
     );
     const existing = await this.getMaterialOrThrow(projectId, materialId);
 
