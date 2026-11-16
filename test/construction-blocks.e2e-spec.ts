@@ -52,7 +52,11 @@ describe('Construction blocks (e2e)', () => {
           .set('Authorization', `Bearer ${token}`)
           .send({
             blocks: [
-              { name: 'Блок А', code: 'blok-a', floorLabels: ['Этаж 1', 'Этаж 2'] },
+              {
+                name: 'Блок А',
+                code: 'blok-a',
+                floorLabels: ['Этаж 1', 'Этаж 2'],
+              },
               { name: 'Блок Б', code: 'blok-b', floorLabels: ['Этаж 1'] },
               { name: 'Блок В', code: 'blok-v' },
             ],
@@ -125,7 +129,9 @@ describe('Construction blocks (e2e)', () => {
 
     it('ACCOUNTANT cannot bulk-create blocks', async () => {
       const project = await createTestProject(prisma.client);
-      const owner = await createTestUser(prisma.client, { role: Role.ACCOUNTANT });
+      const owner = await createTestUser(prisma.client, {
+        role: Role.ACCOUNTANT,
+      });
       try {
         const token = await loginTestUser(app.getHttpServer(), owner.email);
         await request(app.getHttpServer())
@@ -283,6 +289,53 @@ describe('Construction blocks (e2e)', () => {
           block.id,
         );
       } finally {
+        await deleteTestUser(prisma.client, manager.id);
+        await deleteTestProject(prisma.client, project.id);
+      }
+    });
+
+    it('lists blocks by build order and carries their stage', async () => {
+      const { project, manager, token } = await setupProjectWithManager();
+      try {
+        await request(app.getHttpServer())
+          .post(`/projects/${project.id}/construction/blocks/bulk`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({
+            blocks: [
+              { name: 'Блок 10', code: 'b-10', stage: 'D', sortOrder: 10 },
+              { name: 'Блок 2', code: 'b-2', stage: 'A', sortOrder: 2 },
+            ],
+          })
+          .expect(201);
+        const list = await request(app.getHttpServer())
+          .get(`/projects/${project.id}/construction/blocks`)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(200);
+        expect(
+          list.body.map((b: { name: string; stage: string }) => [
+            b.name,
+            b.stage,
+          ]),
+        ).toEqual([
+          ['Блок 2', 'A'],
+          ['Блок 10', 'D'],
+        ]);
+
+        const moved = await request(app.getHttpServer())
+          .patch(
+            `/projects/${project.id}/construction/blocks/${list.body[0].id}`,
+          )
+          .set('Authorization', `Bearer ${token}`)
+          .send({ stage: null, sortOrder: 20 })
+          .expect(200);
+        expect(moved.body).toMatchObject({ stage: null, sortOrder: 20 });
+      } finally {
+        await prisma.client.floor.deleteMany({
+          where: { projectId: project.id },
+        });
+        await prisma.client.buildingBlock.deleteMany({
+          where: { projectId: project.id },
+        });
         await deleteTestUser(prisma.client, manager.id);
         await deleteTestProject(prisma.client, project.id);
       }

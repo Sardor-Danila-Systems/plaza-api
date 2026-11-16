@@ -212,6 +212,12 @@ model BuildingBlock {
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   name      String
   code      String
+  /// Construction stage (очередь) the block belongs to, e.g. "A". Free text
+  /// so a project names its own stages; NULL = not assigned to one.
+  stage     String?
+  /// Display/build order — blocks list by this, then by name, so "Блок 10"
+  /// does not sort before "Блок 2".
+  sortOrder Int      @default(0)
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now()) @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @db.Timestamptz(6)

@@ -35,7 +35,7 @@ export class BlocksService {
     );
     const blocks = await this.prisma.client.buildingBlock.findMany({
       where: { projectId },
-      orderBy: { name: 'asc' },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
     return blocks.map(this.toResponse);
   }
@@ -65,7 +65,13 @@ export class BlocksService {
       ProjectAccessAction.WRITE,
     );
     const block = await this.prisma.client.buildingBlock.create({
-      data: { projectId, name: dto.name, code: dto.code },
+      data: {
+        projectId,
+        name: dto.name,
+        code: dto.code,
+        stage: dto.stage ?? null,
+        sortOrder: dto.sortOrder ?? 0,
+      },
     });
     return this.toResponse(block);
   }
@@ -104,7 +110,13 @@ export class BlocksService {
           let floors = 0;
           for (const entry of dto.blocks) {
             const block = await tx.buildingBlock.create({
-              data: { projectId, name: entry.name, code: entry.code },
+              data: {
+                projectId,
+                name: entry.name,
+                code: entry.code,
+                stage: entry.stage ?? null,
+                sortOrder: entry.sortOrder ?? 0,
+              },
             });
             created.push(block);
             if (entry.floorLabels?.length) {
@@ -156,6 +168,8 @@ export class BlocksService {
       data: {
         ...(dto.name !== undefined ? { name: dto.name } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+        ...(dto.stage !== undefined ? { stage: dto.stage } : {}),
+        ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
       },
     });
     return this.toResponse(block);
@@ -191,6 +205,8 @@ export class BlocksService {
       projectId: block.projectId,
       name: block.name,
       code: block.code,
+      stage: block.stage,
+      sortOrder: block.sortOrder,
       isActive: block.isActive,
       createdAt: block.createdAt,
     };
