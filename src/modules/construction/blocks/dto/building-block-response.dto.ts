@@ -13,6 +13,12 @@ export class BuildingBlockResponseDto {
   @ApiProperty()
   code!: string;
 
+  @ApiProperty({ nullable: true, example: 'A', type: String })
+  stage!: string | null;
+
+  @ApiProperty({ example: 1 })
+  sortOrder!: number;
+
   @ApiProperty()
   isActive!: boolean;
 
