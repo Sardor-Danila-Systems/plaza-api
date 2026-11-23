@@ -93,6 +93,9 @@ export async function deleteTestUser(
   // FinancialTransaction/SupplierPayment, so it must be cleared first —
   // nothing else references an Attachment back.
   await prisma.attachment.deleteMany({ where: { uploadedById: userId } });
+  await prisma.advanceDeduction.deleteMany({
+    where: { OR: [{ advance: userFilter }, { payout: userFilter }] },
+  });
   await prisma.financialTransaction.deleteMany({
     where: { ...userFilter, reversalOfId: { not: null } },
   });
@@ -408,10 +411,12 @@ export async function deleteTestProject(
   // FinancialTransaction/SupplierPayment, so it must be cleared before any
   // of those — nothing else references an Attachment back.
   await prisma.attachment.deleteMany({ where: { projectId } });
+  await prisma.advanceDeduction.deleteMany({ where: { projectId } });
   await prisma.financialTransaction.deleteMany({
     where: { projectId, reversalOfId: { not: null } },
   });
   await prisma.financialTransaction.deleteMany({ where: { projectId } });
+  await prisma.employee.deleteMany({ where: { projectId } });
   // Phase 7/8: StockMovement references PostedOperation, PurchaseItem,
   // StockWriteOff, and WarehouseTransfer, so it must be cleared before any
   // of those — hence before the SettlementAllocation/Purchase/

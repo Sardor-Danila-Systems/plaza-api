@@ -17,6 +17,9 @@ interface ShapeCheckedFields {
   source?: unknown;
   recipient?: unknown;
   isAdvance?: unknown;
+  employeeId?: unknown;
+  accruedAmount?: unknown;
+  deductions?: unknown;
 }
 
 function shapeErrors(dto: ShapeCheckedFields): string[] {
@@ -77,6 +80,22 @@ function shapeErrors(dto: ShapeCheckedFields): string[] {
     }
   }
 
+  if (
+    dto.type !== FinancialTransactionType.SALARY &&
+    (dto.employeeId !== undefined ||
+      dto.accruedAmount !== undefined ||
+      dto.deductions !== undefined)
+  ) {
+    errors.push(
+      'employeeId, accruedAmount and deductions are only valid for SALARY transactions',
+    );
+  }
+  if (
+    dto.isAdvance === true &&
+    (dto.accruedAmount !== undefined || dto.deductions !== undefined)
+  ) {
+    errors.push('an advance cannot carry accruedAmount or deductions');
+  }
   if (dto.isAdvance === true && dto.type !== FinancialTransactionType.SALARY) {
     errors.push('isAdvance is only valid for SALARY transactions');
   }

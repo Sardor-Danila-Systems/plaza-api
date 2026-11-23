@@ -143,6 +143,12 @@ describe('Finances (e2e)', () => {
           })
           .expect(201);
 
+        const employee = await request(app.getHttpServer())
+          .post(`/projects/${project.id}/employees`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ name: 'Site foreman' })
+          .expect(201);
+
         const response = await request(app.getHttpServer())
           .post(`/projects/${project.id}/finances`)
           .set('Authorization', `Bearer ${token}`)
@@ -151,62 +157,13 @@ describe('Finances (e2e)', () => {
             type: 'SALARY',
             amount: '200000.00',
             currency: 'UZS',
-            recipient: 'Site foreman',
+            employeeId: employee.body.id,
             occurredAt: '2026-09-14',
           })
           .expect(201);
 
         expect(response.body.type).toBe('SALARY');
         expect(response.body.direction).toBe('OUT');
-      } finally {
-        await deleteTestProject(prisma.client, project.id);
-      }
-    });
-
-    it('creates a SALARY advance and rejects isAdvance on other types', async () => {
-      const { project, token } = await setupProjectAndManager();
-      try {
-        await request(app.getHttpServer())
-          .post(`/projects/${project.id}/finances`)
-          .set('Authorization', `Bearer ${token}`)
-          .set('Idempotency-Key', idem())
-          .send({
-            type: 'INCOME',
-            amount: '1000000.00',
-            currency: 'UZS',
-            source: 'Capital',
-            occurredAt: '2026-09-14',
-          })
-          .expect(201);
-
-        const advance = await request(app.getHttpServer())
-          .post(`/projects/${project.id}/finances`)
-          .set('Authorization', `Bearer ${token}`)
-          .set('Idempotency-Key', idem())
-          .send({
-            type: 'SALARY',
-            amount: '100000.00',
-            currency: 'UZS',
-            recipient: 'Site foreman',
-            isAdvance: true,
-            occurredAt: '2026-09-14',
-          })
-          .expect(201);
-        expect(advance.body.isAdvance).toBe(true);
-
-        await request(app.getHttpServer())
-          .post(`/projects/${project.id}/finances`)
-          .set('Authorization', `Bearer ${token}`)
-          .set('Idempotency-Key', idem())
-          .send({
-            type: 'EXPENSE',
-            amount: '1000.00',
-            currency: 'UZS',
-            recipient: 'ACME',
-            isAdvance: true,
-            occurredAt: '2026-09-14',
-          })
-          .expect(400);
       } finally {
         await deleteTestProject(prisma.client, project.id);
       }

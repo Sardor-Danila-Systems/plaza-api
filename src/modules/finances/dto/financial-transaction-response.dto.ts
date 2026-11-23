@@ -67,6 +67,17 @@ export class FinancialTransactionResponseDto {
   @ApiProperty({ description: 'SALARY only: payment is an advance (аванс).' })
   isAdvance!: boolean;
 
+  @ApiProperty({ required: false, nullable: true, format: 'uuid' })
+  employeeId!: string | null;
+
+  @ApiProperty({
+    required: false,
+    nullable: true,
+    description:
+      'Salary payout: accrued ("начислено"); amount is the cash paid.',
+  })
+  accruedAmount!: string | null;
+
   @ApiProperty({ required: false, nullable: true })
   comment!: string | null;
 

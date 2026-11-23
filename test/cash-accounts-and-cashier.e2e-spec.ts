@@ -353,7 +353,7 @@ describe('Cash accounts and the CASHIER role (e2e)', () => {
           account: 'CASH',
         }).expect(201);
         await post(project.id, token, {
-          type: 'SALARY',
+          type: 'EXPENSE',
           amount: '40000.00',
           account: 'CASH',
           recipient: 'Рабочий',
