@@ -16,6 +16,7 @@ interface ShapeCheckedFields {
   rateOverrideReason?: unknown;
   source?: unknown;
   recipient?: unknown;
+  isAdvance?: unknown;
 }
 
 function shapeErrors(dto: ShapeCheckedFields): string[] {
@@ -74,6 +75,10 @@ function shapeErrors(dto: ShapeCheckedFields): string[] {
         'source must not be supplied for EXPENSE/SALARY transactions; use recipient instead',
       );
     }
+  }
+
+  if (dto.isAdvance === true && dto.type !== FinancialTransactionType.SALARY) {
+    errors.push('isAdvance is only valid for SALARY transactions');
   }
 
   return errors;

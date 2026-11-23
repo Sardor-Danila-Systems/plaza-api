@@ -163,6 +163,55 @@ describe('Finances (e2e)', () => {
       }
     });
 
+    it('creates a SALARY advance and rejects isAdvance on other types', async () => {
+      const { project, token } = await setupProjectAndManager();
+      try {
+        await request(app.getHttpServer())
+          .post(`/projects/${project.id}/finances`)
+          .set('Authorization', `Bearer ${token}`)
+          .set('Idempotency-Key', idem())
+          .send({
+            type: 'INCOME',
+            amount: '1000000.00',
+            currency: 'UZS',
+            source: 'Capital',
+            occurredAt: '2026-09-14',
+          })
+          .expect(201);
+
+        const advance = await request(app.getHttpServer())
+          .post(`/projects/${project.id}/finances`)
+          .set('Authorization', `Bearer ${token}`)
+          .set('Idempotency-Key', idem())
+          .send({
+            type: 'SALARY',
+            amount: '100000.00',
+            currency: 'UZS',
+            recipient: 'Site foreman',
+            isAdvance: true,
+            occurredAt: '2026-09-14',
+          })
+          .expect(201);
+        expect(advance.body.isAdvance).toBe(true);
+
+        await request(app.getHttpServer())
+          .post(`/projects/${project.id}/finances`)
+          .set('Authorization', `Bearer ${token}`)
+          .set('Idempotency-Key', idem())
+          .send({
+            type: 'EXPENSE',
+            amount: '1000.00',
+            currency: 'UZS',
+            recipient: 'ACME',
+            isAdvance: true,
+            occurredAt: '2026-09-14',
+          })
+          .expect(400);
+      } finally {
+        await deleteTestProject(prisma.client, project.id);
+      }
+    });
+
     it('creates a USD income with an explicit exchangeRate override', async () => {
       const { project, token } = await setupProjectAndManager();
       try {

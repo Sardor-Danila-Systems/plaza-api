@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
+  IsBoolean,
   IsEnum,
   IsIn,
   IsOptional,
@@ -49,7 +50,8 @@ export class CreateFinancialTransactionDto {
     enum: CashAccount,
     required: false,
     default: CashAccount.CASH,
-    description: 'Which cash account the money moves through (Наличные / Банк).',
+    description:
+      'Which cash account the money moves through (Наличные / Банк).',
   })
   @IsOptional()
   @IsEnum(CashAccount)
@@ -110,6 +112,15 @@ export class CreateFinancialTransactionDto {
   @IsString()
   @Length(1, 300)
   recipient?: string;
+
+  @ApiProperty({
+    required: false,
+    default: false,
+    description: 'SALARY only: the payment is an advance (аванс) on salary.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isAdvance?: boolean;
 
   @ApiProperty({ required: false })
   @IsOptional()

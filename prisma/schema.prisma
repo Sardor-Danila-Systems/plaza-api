@@ -483,6 +483,10 @@ model FinancialTransaction {
   recipient String?
   comment   String?
 
+  /// SALARY only: this payment is an advance (аванс) against salary, not the
+  /// final pay. Reversal rows copy it from the original.
+  isAdvance Boolean @default(false)
+
   occurredAt DateTime @db.Date
 
   createdById String   @db.Uuid
