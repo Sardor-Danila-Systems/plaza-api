@@ -481,12 +481,13 @@ export class AttachmentsService {
         }
         if (
           transaction.type !== FinancialTransactionType.INCOME &&
-          transaction.type !== FinancialTransactionType.EXPENSE
+          transaction.type !== FinancialTransactionType.EXPENSE &&
+          transaction.type !== FinancialTransactionType.SALARY
         ) {
           throw new ConflictException({
             code: 'UNSUPPORTED_ATTACHMENT_TARGET',
             message:
-              'Attachments may only target INCOME or EXPENSE financial transactions directly',
+              'Attachments may only target INCOME, EXPENSE or SALARY financial transactions directly',
           });
         }
         return { financialTransactionId: targetId };

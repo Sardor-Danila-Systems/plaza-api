@@ -34,6 +34,11 @@ import { FinancialTransactionResponseDto } from './dto/financial-transaction-res
 import { ListFinancialTransactionsQueryDto } from './dto/list-financial-transactions-query.dto.js';
 import { PaginatedFinancialTransactionsResponseDto } from './dto/paginated-financial-transactions-response.dto.js';
 import { BalanceResponseDto } from './dto/balance-response.dto.js';
+import {
+  assertAdvanceNotDeducted,
+  prepareSalaryPayout,
+  type PreparedPayout,
+} from './employees/salary-advance.util.js';
 
 const CREATE_OPERATION_KIND = 'financial_transaction.create';
 const CANCEL_OPERATION_KIND = 'financial_transaction.cancel';
@@ -115,6 +120,10 @@ export class FinancialPostingService {
       categoryId: dto.categoryId,
       source: dto.source,
       recipient: dto.recipient,
+      isAdvance: dto.isAdvance,
+      employeeId: dto.employeeId,
+      accruedAmount: dto.accruedAmount,
+      deductions: dto.deductions,
       comment: dto.comment,
       occurredAt: dto.occurredAt,
     });
@@ -157,6 +166,43 @@ export class FinancialPostingService {
         const { exchangeRate, rateId, rateOverrideReason, rateSource } =
           await this.resolveRate(tx, projectId, dto.currency, dto);
         const amount = new Prisma.Decimal(dto.amount);
+
+        let employee: { id: string; name: string } | null = null;
+        let payout: PreparedPayout = { accruedAmount: null, deductions: [] };
+        if (dto.type === FinancialTransactionType.SALARY) {
+          if (!dto.employeeId) {
+            throw new BadRequestException({
+              code: 'VALIDATION_ERROR',
+              message: 'employeeId is required for SALARY transactions',
+            });
+          }
+          employee = await tx.employee.findFirst({
+            where: { id: dto.employeeId, projectId, isActive: true },
+            select: { id: true, name: true },
+          });
+          if (!employee) {
+            throw new NotFoundException({
+              code: 'NOT_FOUND',
+              message: 'Active employee not found in this project',
+            });
+          }
+        }
+        if (dto.type === FinancialTransactionType.SALARY && !dto.isAdvance) {
+          payout = await prepareSalaryPayout(
+            tx,
+            projectId,
+            employee!.id,
+            dto.currency,
+            amount,
+            dto.accruedAmount,
+            dto.deductions,
+          );
+        } else if (amount.lte(0)) {
+          throw new BadRequestException({
+            code: 'VALIDATION_ERROR',
+            message: 'amount must be greater than zero',
+          });
+        }
         const amountUzs = computeAmountUzs(amount, exchangeRate);
         const direction = directionForType(dto.type);
 
@@ -190,7 +236,7 @@ export class FinancialPostingService {
         const recipient =
           dto.type === FinancialTransactionType.INCOME
             ? dto.source
-            : dto.recipient;
+            : (employee?.name ?? dto.recipient);
 
         const created = await tx.financialTransaction.create({
           data: {
@@ -209,11 +255,25 @@ export class FinancialPostingService {
             categoryId: category?.id ?? null,
             categoryNameSnapshot: category?.name ?? null,
             recipient: recipient ?? null,
+            isAdvance: dto.isAdvance ?? false,
+            employeeId: employee?.id ?? null,
+            accruedAmount: payout.accruedAmount,
             comment: dto.comment ?? null,
             occurredAt: new Date(`${dto.occurredAt}T00:00:00.000Z`),
             createdById: user.id,
           },
         });
+
+        for (const d of payout.deductions) {
+          await tx.advanceDeduction.create({
+            data: {
+              projectId,
+              advanceId: d.advanceId,
+              payoutId: created.id,
+              amount: d.amount,
+            },
+          });
+        }
 
         const response = this.toResponse(created);
         await this.audit.record(tx, {
@@ -480,6 +540,10 @@ export class FinancialPostingService {
           });
         }
 
+        if (original.isAdvance) {
+          await assertAdvanceNotDeducted(tx, projectId, original.id);
+        }
+
         const reversalDirection =
           original.direction === TransactionDirection.IN
             ? TransactionDirection.OUT
@@ -548,6 +612,9 @@ export class FinancialPostingService {
             categoryId: original.categoryId,
             categoryNameSnapshot: original.categoryNameSnapshot,
             recipient: original.recipient,
+            isAdvance: original.isAdvance,
+            employeeId: original.employeeId,
+            accruedAmount: original.accruedAmount,
             comment: original.comment,
             occurredAt: original.occurredAt,
             createdById: user.id,
@@ -933,6 +1000,9 @@ export class FinancialPostingService {
         rateId: original.rateId,
         rateOverrideReason: original.rateOverrideReason,
         recipient: original.recipient,
+        isAdvance: original.isAdvance,
+        employeeId: original.employeeId,
+        accruedAmount: original.accruedAmount,
         comment: original.comment,
         occurredAt: original.occurredAt,
         createdById: params.createdById,
@@ -1022,6 +1092,9 @@ export class FinancialPostingService {
       categoryId: row.categoryId,
       categoryNameSnapshot: row.categoryNameSnapshot,
       recipient: row.recipient,
+      isAdvance: row.isAdvance,
+      employeeId: row.employeeId,
+      accruedAmount: row.accruedAmount ? row.accruedAmount.toFixed(2) : null,
       comment: row.comment,
       occurredAt: row.occurredAt.toISOString().slice(0, 10),
       createdById: row.createdById,

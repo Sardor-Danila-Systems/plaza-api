@@ -106,6 +106,8 @@ model Project {
   stockWriteOffs        StockWriteOff[]
   warehouseTransfers    WarehouseTransfer[]
   attachments           Attachment[]
+  employees             Employee[]
+  advanceDeductions     AdvanceDeduction[]
 
   @@index([isActive])
 }
@@ -444,7 +446,7 @@ model FinancialTransaction {
   type        FinancialTransactionType
   direction   TransactionDirection
 
-  amount       Decimal  @db.Decimal(24, 2)
+  amount       Decimal     @db.Decimal(24, 2)
   currency     Currency
   /// Every row predating the split was physical cash, hence the default.
   /// A reversal always carries its original's account, so cancelling an
@@ -458,8 +460,8 @@ model FinancialTransaction {
   /// a cross-column conditional constraint natively; see docs/adr/0008).
   /// Captured once at posting time and never recomputed later, even if
   /// CurrencyRate later gains a corrected entry for the same day.
-  exchangeRate Decimal  @db.Decimal(24, 8)
-  amountUzs    Decimal  @db.Decimal(24, 2)
+  exchangeRate Decimal     @db.Decimal(24, 8)
+  amountUzs    Decimal     @db.Decimal(24, 2)
 
   rateSource         RateSource    @default(MANUAL)
   rateId             String?       @db.Uuid
@@ -482,6 +484,22 @@ model FinancialTransaction {
   /// not a schema concept.
   recipient String?
   comment   String?
+
+  /// SALARY only: this payment is an advance (аванс) against salary, not the
+  /// final pay. Reversal rows copy it from the original.
+  isAdvance     Boolean   @default(false)
+  /// SALARY only: the employee this advance/payout belongs to (required for
+  /// new SALARY rows by the posting service; legacy rows stay NULL).
+  employeeId    String?   @db.Uuid
+  employee      Employee? @relation(fields: [projectId, employeeId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  /// Salary payout only: the salary accrued ("начислено"). The cash that
+  /// actually left the till is `amount` ("к выдаче"), so
+  /// accruedAmount = amount + the advances deducted in this payout.
+  accruedAmount Decimal?  @db.Decimal(24, 2)
+
+  /// Advances deducted by this payout / payouts that deducted this advance.
+  deductionsAsPayout  AdvanceDeduction[] @relation("DeductionPayout")
+  deductionsAsAdvance AdvanceDeduction[] @relation("DeductionAdvance")
 
   occurredAt DateTime @db.Date
 
@@ -1385,4 +1403,41 @@ model Attachment {
   @@index([projectId, financialTransactionId])
   @@index([projectId, supplierPaymentId])
   @@index([status, expiresAt])
+}
+
+/// A person paid a salary in one project. Salary advances and payouts are
+/// tied to an employee so the outstanding advance balance can be tracked.
+/// Never deleted, only deactivated.
+model Employee {
+  id        String   @id @default(uuid()) @db.Uuid
+  projectId String   @db.Uuid
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  transactions FinancialTransaction[]
+
+  @@unique([projectId, id])
+  @@index([projectId, isActive])
+}
+
+/// Part of one salary advance withheld from one salary payout. An advance's
+/// outstanding balance = its amount − the deductions of payouts that are not
+/// cancelled, so cancelling a payout releases its advances automatically.
+model AdvanceDeduction {
+  id        String               @id @default(uuid()) @db.Uuid
+  projectId String               @db.Uuid
+  project   Project              @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  advanceId String               @db.Uuid
+  advance   FinancialTransaction @relation("DeductionAdvance", fields: [projectId, advanceId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  payoutId  String               @db.Uuid
+  payout    FinancialTransaction @relation("DeductionPayout", fields: [projectId, payoutId], references: [projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  amount    Decimal              @db.Decimal(24, 2)
+  createdAt DateTime             @default(now()) @db.Timestamptz(6)
+
+  @@unique([advanceId, payoutId])
+  @@index([projectId, advanceId])
+  @@index([projectId, payoutId])
 }

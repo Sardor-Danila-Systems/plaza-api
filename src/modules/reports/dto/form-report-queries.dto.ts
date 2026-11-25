@@ -22,3 +22,9 @@ export class CashJournalQueryDto extends ReportPeriodQueryDto {
   @IsEnum(CashAccount)
   account?: CashAccount;
 }
+
+export class EmployeeLedgerQueryDto extends ReportPeriodQueryDto {
+  @ApiProperty({ description: 'Employee whose advances and salary to export' })
+  @IsUUID()
+  employeeId!: string;
+}

@@ -5,6 +5,8 @@ import { TransactionCategoriesController } from './categories/transaction-catego
 import { TransactionCategoriesService } from './categories/transaction-categories.service.js';
 import { CurrencyRatesController } from './currency-rates/currency-rates.controller.js';
 import { CurrencyRatesService } from './currency-rates/currency-rates.service.js';
+import { EmployeesController } from './employees/employees.controller.js';
+import { EmployeesService } from './employees/employees.service.js';
 import { FinancialPostingService } from './financial-posting.service.js';
 import { FinancialTransactionsController } from './financial-transactions.controller.js';
 
@@ -14,11 +16,13 @@ import { FinancialTransactionsController } from './financial-transactions.contro
     FinancialTransactionsController,
     TransactionCategoriesController,
     CurrencyRatesController,
+    EmployeesController,
   ],
   providers: [
     FinancialPostingService,
     TransactionCategoriesService,
     CurrencyRatesService,
+    EmployeesService,
   ],
   exports: [FinancialPostingService, TransactionCategoriesService],
 })

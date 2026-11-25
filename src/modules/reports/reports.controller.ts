@@ -19,6 +19,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.js';
 import {
   CashJournalQueryDto,
+  EmployeeLedgerQueryDto,
   MaterialReportQueryDto,
   SupplierReconciliationQueryDto,
 } from './dto/form-report-queries.dto.js';
@@ -81,6 +82,20 @@ export class ReportsController {
     @Res() res: Response,
   ): Promise<void> {
     await this.formReports.cashJournal(user, projectId, query, res);
+  }
+
+  @Get('employee-ledger.xlsx')
+  @ApiOperation({
+    summary: 'Advances, salary payouts and deductions of one employee',
+  })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  async employeeLedger(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Query() query: EmployeeLedgerQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    await this.formReports.employeeLedger(user, projectId, query, res);
   }
 
   @Get('cash.xlsx')

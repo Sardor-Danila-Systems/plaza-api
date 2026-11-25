@@ -143,6 +143,12 @@ describe('Finances (e2e)', () => {
           })
           .expect(201);
 
+        const employee = await request(app.getHttpServer())
+          .post(`/projects/${project.id}/employees`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ name: 'Site foreman' })
+          .expect(201);
+
         const response = await request(app.getHttpServer())
           .post(`/projects/${project.id}/finances`)
           .set('Authorization', `Bearer ${token}`)
@@ -151,7 +157,7 @@ describe('Finances (e2e)', () => {
             type: 'SALARY',
             amount: '200000.00',
             currency: 'UZS',
-            recipient: 'Site foreman',
+            employeeId: employee.body.id,
             occurredAt: '2026-09-14',
           })
           .expect(201);

@@ -1,12 +1,16 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
+  IsArray,
+  IsBoolean,
   IsEnum,
   IsIn,
   IsOptional,
   IsString,
   IsUUID,
   Length,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import {
   CashAccount,
   Currency,
@@ -25,6 +29,16 @@ const CREATABLE_TYPES = [
   FinancialTransactionType.SALARY,
 ] as const;
 
+export class AdvanceDeductionInputDto {
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID()
+  advanceId!: string;
+
+  @ApiProperty({ example: '100000.00' })
+  @IsDecimalString({ maxDecimalPlaces: 2 })
+  amount!: string;
+}
+
 export class CreateFinancialTransactionDto {
   @ApiProperty({
     enum: CREATABLE_TYPES,
@@ -36,9 +50,10 @@ export class CreateFinancialTransactionDto {
 
   @ApiProperty({
     example: '150000.00',
-    description: 'Positive decimal string, at most 2 fractional digits.',
+    description:
+      'Decimal string, at most 2 fractional digits. Positive, except a salary payout whose whole accrued amount is covered by deducted advances (then 0.00). For a salary payout this is the cash actually paid ("к выдаче").',
   })
-  @IsDecimalString({ maxDecimalPlaces: 2 })
+  @IsDecimalString({ maxDecimalPlaces: 2, positive: false })
   amount!: string;
 
   @ApiProperty({ enum: Currency })
@@ -49,7 +64,8 @@ export class CreateFinancialTransactionDto {
     enum: CashAccount,
     required: false,
     default: CashAccount.CASH,
-    description: 'Which cash account the money moves through (Наличные / Банк).',
+    description:
+      'Which cash account the money moves through (Наличные / Банк).',
   })
   @IsOptional()
   @IsEnum(CashAccount)
@@ -110,6 +126,45 @@ export class CreateFinancialTransactionDto {
   @IsString()
   @Length(1, 300)
   recipient?: string;
+
+  @ApiProperty({
+    required: false,
+    format: 'uuid',
+    description: 'SALARY only (required): the employee paid.',
+  })
+  @IsOptional()
+  @IsUUID()
+  employeeId?: string;
+
+  @ApiProperty({
+    required: false,
+    example: '1000000.00',
+    description:
+      'Salary payout only: accrued salary ("начислено"). Must equal amount + the sum of deductions.',
+  })
+  @IsOptional()
+  @IsDecimalString({ maxDecimalPlaces: 2 })
+  accruedAmount?: string;
+
+  @ApiProperty({
+    required: false,
+    type: [AdvanceDeductionInputDto],
+    description: 'Salary payout only: advances withheld from this salary.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AdvanceDeductionInputDto)
+  deductions?: AdvanceDeductionInputDto[];
+
+  @ApiProperty({
+    required: false,
+    default: false,
+    description: 'SALARY only: the payment is an advance (аванс) on salary.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isAdvance?: boolean;
 
   @ApiProperty({ required: false })
   @IsOptional()

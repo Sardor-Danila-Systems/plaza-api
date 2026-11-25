@@ -16,6 +16,7 @@ import { ProjectAccessArea } from '../../projects/project-access-area.enum.js';
 import { ProjectAccessService } from '../../projects/project-access.service.js';
 import {
   CashJournalQueryDto,
+  EmployeeLedgerQueryDto,
   MaterialReportQueryDto,
   SupplierReconciliationQueryDto,
 } from '../dto/form-report-queries.dto.js';
@@ -654,6 +655,210 @@ export class FormReportsService {
   // ---------------------------------------------------------------------
   // Общий кассовый журнал
   // ---------------------------------------------------------------------
+
+  async employeeLedger(
+    user: AuthenticatedUser,
+    projectId: string,
+    query: EmployeeLedgerQueryDto,
+    res: Response,
+  ): Promise<void> {
+    const project = await this.projectAccess.assertAccess(
+      user,
+      projectId,
+      ProjectAccessAction.READ,
+      ProjectAccessArea.CASH,
+    );
+    const employee = await this.prisma.client.employee.findFirst({
+      where: { id: query.employeeId, projectId },
+    });
+    if (!employee) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Employee not found in this project',
+      });
+    }
+    const { from, toExclusive, lastDay } = resolvePeriod(query);
+
+    // Cancelled operations disappear together with their reversal rows, and
+    // a cancelled payout no longer deducts anything.
+    const rows = await this.prisma.client.financialTransaction.findMany({
+      where: {
+        projectId,
+        employeeId: employee.id,
+        cancelledAt: null,
+        reversalOfId: null,
+        occurredAt: { lt: toExclusive },
+      },
+      include: { deductionsAsPayout: true },
+      orderBy: [{ occurredAt: 'asc' }, { createdAt: 'asc' }],
+    });
+
+    const balance = new Map<Currency, Prisma.Decimal>();
+    const effect = (r: (typeof rows)[number]): Prisma.Decimal =>
+      r.isAdvance
+        ? r.amount
+        : r.deductionsAsPayout
+            .reduce((sum, d) => sum.plus(d.amount), ZERO)
+            .negated();
+    for (const r of rows.filter((x) => x.occurredAt < from)) {
+      balance.set(
+        r.currency,
+        (balance.get(r.currency) ?? ZERO).plus(effect(r)),
+      );
+    }
+    const inPeriod = rows.filter((x) => x.occurredAt >= from);
+
+    const workbook = newFormWorkbook();
+    const sheet = workbook.addWorksheet('Авансы и зарплата', {
+      pageSetup: { orientation: 'landscape', fitToPage: true, fitToHeight: 0 },
+    });
+    sheet.columns = [
+      { width: 12 },
+      { width: 22 },
+      { width: 18 },
+      { width: 8 },
+      { width: 18 },
+      { width: 18 },
+      { width: 18 },
+      { width: 18 },
+      { width: 18 },
+      { width: 36 },
+    ];
+    const LAST = 10;
+    heading(sheet, 1, LAST, safeText(project.name), { align: 'left' });
+    heading(sheet, 2, LAST, 'Авансы и зарплата по сотруднику', {
+      bold: true,
+      size: 13,
+    });
+    heading(sheet, 3, LAST, safeText(employee.name), { bold: true });
+    heading(sheet, 4, LAST, `за период ${ruDate(from)} - ${ruDate(lastDay)}`);
+
+    const header = [
+      'Дата',
+      'Операция',
+      'Касса',
+      'Валюта',
+      'Выдан аванс',
+      'Начислено',
+      'Удержано авансов',
+      'Выдано на руки',
+      'Остаток авансов',
+      'Комментарий',
+    ];
+    let rowIndex = 6;
+    header.forEach((text, i) => {
+      const cell = sheet.getCell(rowIndex, i + 1);
+      cell.value = text;
+      style(cell, {
+        bold: true,
+        align: 'center',
+        border: true,
+        fill: HEADER_FILL,
+        wrap: true,
+      });
+    });
+    rowIndex += 1;
+
+    const opening = [...balance.entries()].filter(([, v]) => !v.isZero());
+    for (const [currency, value] of opening) {
+      sheet.getCell(rowIndex, 2).value = 'Остаток на начало';
+      sheet.getCell(rowIndex, 4).value = currency;
+      sheet.getCell(rowIndex, 9).value = num(value);
+      for (let c = 1; c <= LAST; c += 1) {
+        style(sheet.getCell(rowIndex, c), {
+          border: true,
+          bold: true,
+          fill: TOTAL_FILL,
+          numFmt: c >= 5 && c <= 9 ? MONEY_FORMAT : undefined,
+        });
+      }
+      rowIndex += 1;
+    }
+
+    const totals = new Map<
+      Currency,
+      {
+        advanced: Prisma.Decimal;
+        accrued: Prisma.Decimal;
+        deducted: Prisma.Decimal;
+        paid: Prisma.Decimal;
+      }
+    >();
+    for (const r of inPeriod) {
+      const deducted = r.isAdvance
+        ? ZERO
+        : r.deductionsAsPayout.reduce((sum, d) => sum.plus(d.amount), ZERO);
+      balance.set(
+        r.currency,
+        (balance.get(r.currency) ?? ZERO).plus(effect(r)),
+      );
+      const t = totals.get(r.currency) ?? {
+        advanced: ZERO,
+        accrued: ZERO,
+        deducted: ZERO,
+        paid: ZERO,
+      };
+      if (r.isAdvance) t.advanced = t.advanced.plus(r.amount);
+      else {
+        t.accrued = t.accrued.plus(r.accruedAmount ?? r.amount);
+        t.deducted = t.deducted.plus(deducted);
+        t.paid = t.paid.plus(r.amount);
+      }
+      totals.set(r.currency, t);
+
+      const values: (string | number | Date)[] = [
+        r.occurredAt,
+        r.isAdvance ? 'Аванс' : 'Выплата зарплаты',
+        ACCOUNT_LABELS[r.account],
+        r.currency,
+        r.isAdvance ? num(r.amount) : '',
+        r.isAdvance ? '' : num(r.accruedAmount ?? r.amount),
+        r.isAdvance ? '' : num(deducted),
+        r.isAdvance ? '' : num(r.amount),
+        num(balance.get(r.currency) ?? ZERO),
+        safeText(r.comment),
+      ];
+      values.forEach((v, i) => {
+        const cell = sheet.getCell(rowIndex, i + 1);
+        cell.value = v;
+        style(cell, {
+          border: true,
+          align:
+            i === 0 || i === 3 ? 'center' : i >= 4 && i <= 8 ? 'right' : 'left',
+          numFmt:
+            i === 0
+              ? 'dd.mm.yyyy'
+              : i >= 4 && i <= 8
+                ? MONEY_FORMAT
+                : undefined,
+          wrap: i === 9,
+        });
+      });
+      rowIndex += 1;
+    }
+
+    for (const [currency, t] of totals) {
+      sheet.getCell(rowIndex, 2).value = 'Итого за период';
+      sheet.getCell(rowIndex, 4).value = currency;
+      sheet.getCell(rowIndex, 5).value = num(t.advanced);
+      sheet.getCell(rowIndex, 6).value = num(t.accrued);
+      sheet.getCell(rowIndex, 7).value = num(t.deducted);
+      sheet.getCell(rowIndex, 8).value = num(t.paid);
+      sheet.getCell(rowIndex, 9).value = num(balance.get(currency) ?? ZERO);
+      for (let c = 1; c <= LAST; c += 1) {
+        style(sheet.getCell(rowIndex, c), {
+          border: true,
+          bold: true,
+          fill: TOTAL_FILL,
+          align: c >= 5 && c <= 9 ? 'right' : 'left',
+          numFmt: c >= 5 && c <= 9 ? MONEY_FORMAT : undefined,
+        });
+      }
+      rowIndex += 1;
+    }
+
+    await sendWorkbook(res, 'employee-ledger.xlsx', workbook);
+  }
 
   async cashJournal(
     user: AuthenticatedUser,
