@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from './config/config.module.js';
 import { PrismaModule } from './database/prisma.module.js';
 import { AnalyticsModule } from './modules/analytics/analytics.module.js';
+import { AssistantModule } from './modules/assistant/assistant.module.js';
 import { AttachmentsModule } from './modules/attachments/attachments.module.js';
 import { AuditModule } from './modules/audit/audit.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
@@ -30,6 +31,7 @@ import { SuppliersModule } from './modules/suppliers/suppliers.module.js';
     AttachmentsModule,
     AnalyticsModule,
     ReportsModule,
+    AssistantModule,
   ],
 })
 export class AppModule {}

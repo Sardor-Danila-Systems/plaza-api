@@ -19,6 +19,6 @@ import { ProjectsService } from './projects.service.js';
   // before touching project-scoped data. ProjectProvisioningService: only
   // src/cli/provision.ts and prisma/seed.ts call it (never a controller —
   // see ADR 0014).
-  exports: [ProjectAccessService, ProjectProvisioningService],
+  exports: [ProjectAccessService, ProjectProvisioningService, ProjectsService],
 })
 export class ProjectsModule {}

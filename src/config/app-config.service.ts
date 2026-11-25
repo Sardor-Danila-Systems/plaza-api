@@ -144,4 +144,12 @@ export class AppConfigService {
       this.configService.get('ATTACHMENT_ORPHAN_TTL', { infer: true }),
     );
   }
+
+  get anthropicApiKey(): string | undefined {
+    return this.configService.get('ANTHROPIC_API_KEY', { infer: true });
+  }
+
+  get assistantModel(): string {
+    return this.configService.get('ASSISTANT_MODEL', { infer: true });
+  }
 }

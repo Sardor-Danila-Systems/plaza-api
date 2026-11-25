@@ -25,6 +25,6 @@ import { SuppliersService } from './suppliers.service.js';
     DebtPaymentsService,
     SupplierLedgerService,
   ],
-  exports: [SuppliersService],
+  exports: [SuppliersService, SupplierLedgerService],
 })
 export class SuppliersModule {}

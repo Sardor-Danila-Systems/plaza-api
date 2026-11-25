@@ -198,6 +198,18 @@ class EnvironmentVariables {
     message: 'ATTACHMENT_ORPHAN_TTL must look like "24h", "7d", or "3600s"',
   })
   ATTACHMENT_ORPHAN_TTL: string = '24h';
+
+  // --- Owner AI assistant ---
+
+  /** Claude API key. Without it the /assistant endpoints answer 503 and the
+   * rest of the API runs normally. */
+  @IsOptional()
+  @IsString()
+  ANTHROPIC_API_KEY?: string;
+
+  @IsOptional()
+  @IsString()
+  ASSISTANT_MODEL: string = 'claude-opus-5-5';
 }
 
 /**

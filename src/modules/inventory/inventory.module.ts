@@ -41,6 +41,7 @@ import { WriteOffsService } from './write-offs/write-offs.service.js';
     MaterialsService,
     MaterialCategoriesService,
     UnitsService,
+    InventoryBalancesService,
   ],
 })
 export class InventoryModule {}
